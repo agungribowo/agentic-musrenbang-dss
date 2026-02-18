@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
 import dagshub
 import mlflow
 
@@ -13,21 +13,18 @@ DAGSHUB_OWNER = os.getenv("DAGSHUB_REPO_OWNER")
 DAGSHUB_REPO = os.getenv("DAGSHUB_REPO_NAME")
 
 # Definisi nama model global agar konsisten di seluruh agen
-DEFAULT_LLM_MODEL = "gemini-1.5-flash"
+DEFAULT_LLM_MODEL = "gemini-2.5-flash"
 
 def setup_environment():
-    """
-    Fungsi untuk menginisialisasi semua koneksi eksternal secara aman.
-    Dipanggil satu kali saat sistem utama dijalankan.
-    """
+    global gemini_client
     print("Memulai inisialisasi sistem...")
 
-    # 1. Validasi dan Konfigurasi Gemini API
+    # 1. Validasi dan Konfigurasi Gemini API (SDK Baru)
     if not GEMINI_API_KEY:
         raise ValueError("ERORR: GEMINI_API_KEY tidak ditemukan di file .env!")
     
-    genai.configure(api_key=GEMINI_API_KEY)
-    print("[-] Koneksi ke Gemini API: BERHASIL")
+    gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+    print("[-] Koneksi ke Gemini API (SDK Baru): BERHASIL")
 
     # 2. Konfigurasi MLflow & DagsHub
     if DAGSHUB_OWNER and DAGSHUB_REPO:
@@ -41,6 +38,5 @@ def setup_environment():
     else:
         print("[!] Peringatan: Kredensial DagsHub tidak lengkap. Eksperimen tidak akan tercatat di cloud.")
 
-# Jika file ini dijalankan langsung (untuk testing koneksi)
 if __name__ == "__main__":
     setup_environment()
