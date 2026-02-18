@@ -1,0 +1,38 @@
+Agentic-Musrenbang-DSS/
+│
+├── data/                      # 🗂️ Penyimpanan Data (Diabaikan oleh Git)
+│   ├── raw/                   # Data mentah asli (misal: form_usulan_warga_rw23.csv)
+│   ├── processed/             # Data yang sudah dibersihkan/diformat ulang
+│   └── external/              # Kamus Usulan Renstramas.csv
+│
+├── src/                       # 🧠 Kode Inti Aplikasi (Source Code)
+│   ├── __init__.py
+│   ├── agents/                # Kumpulan agen spesialis (Modular)
+│   │   ├── __init__.py
+│   │   ├── classifier_agent.py  # Agen pemeta Kamus Usulan
+│   │   ├── mitigation_agent.py  # Agen penilai tingkat bahaya
+│   │   ├── sociology_agent.py   # Agen penilai dampak sosial
+│   │   └── economy_agent.py     # Agen estimasi anggaran
+│   │
+│   ├── tools/                 # Alat bantu untuk agen
+│   │   ├── __init__.py
+│   │   └── rag_engine.py      # Logika ChromaDB & Vector Search dipisah ke sini
+│   │
+│   ├── config/                # Pengaturan sistem
+│   │   ├── __init__.py
+│   │   └── settings.py        # Load environment variables, konfig model LLM
+│   │
+│   └── utils/                 # Fungsi bantuan (Helper)
+│       ├── __init__.py
+│       └── logger.py          # Setup MLflow logging standar
+│
+├── notebooks/                 # 📓 Area Eksperimen Jupyter (Bebas kotor)
+│   └── 01_eda_data_warga.ipynb  # Eksplorasi data awal sebelum masuk ke src/
+│
+├── chroma_db/                 # 🗄️ Database Vektor Lokal (Diabaikan oleh Git)
+│
+├── .env                       # 🔐 Variabel Rahasia (API Keys, DagsHub Token)
+├── .gitignore                 # 🚫 Daftar file yang tidak boleh di-upload ke GitHub/DagsHub
+├── requirements.txt           # 📦 Daftar pasti library & versinya (Kunci Reproducibility!)
+├── main_orchestrator.py       # 🚀 Entry point: Menjalankan semua agen secara berurutan
+└── README.md                  # 📖 Dokumentasi cara instalasi dan menjalankan proyek

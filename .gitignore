@@ -1,0 +1,15 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.env
+.DS_Store
+setup.ps1
+
+# Mengabaikan data lokal dan database
+data/raw/
+chroma_db/
+*.csv
+*.xlsx
