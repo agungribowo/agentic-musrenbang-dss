@@ -31,8 +31,10 @@ class MitigationAgent:
 
         # Membuat eksperimen baru khusus untuk Agen Mitigasi di MLflow
         mlflow.set_experiment("Eksperimen_02_Agen_Mitigasi")
+
+        is_nested_run = mlflow.active_run() is not None
         
-        with mlflow.start_run(run_name=run_name):
+        with mlflow.start_run(run_name=run_name, nested=is_nested_run):
             
             # TAHAP 1: Menyusun Prompt Evaluasi Risiko
             PROMPT_VERSION = "v1.0_RiskScoring"

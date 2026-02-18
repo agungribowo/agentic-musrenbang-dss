@@ -13,7 +13,7 @@ DAGSHUB_OWNER = os.getenv("DAGSHUB_REPO_OWNER")
 DAGSHUB_REPO = os.getenv("DAGSHUB_REPO_NAME")
 
 # Definisi nama model global agar konsisten di seluruh agen
-DEFAULT_LLM_MODEL = "gemini-2.5-flash"
+DEFAULT_LLM_MODEL = "gemini-2.0-flash"
 
 def setup_environment():
     global gemini_client
