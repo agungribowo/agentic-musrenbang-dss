@@ -7,6 +7,7 @@ __pycache__/
 .env
 .DS_Store
 setup.ps1
+.vscode/
 
 # Mengabaikan data lokal dan database
 data/raw/
