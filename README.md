@@ -213,6 +213,42 @@ python .\main_orchestrator.py --quick-case
 
 > Rekomendasi presenter: jalankan langkah 1 sebelum sesi dimulai, lalu tampilkan langkah 2 dan 3 saat live demo.
 
+### Script Moderator (60–90 detik per command)
+
+Gunakan naskah berikut saat live demo agar alur presentasi konsisten dan mudah diikuti audiens non-teknis.
+
+#### Command 1 — Setup environment
+
+```powershell
+./setup.ps1 -SkipInstall
+```
+
+**Narasi (±60 detik):**
+"Di langkah pertama, saya memastikan environment proyek aktif dan konsisten. Script ini menyiapkan virtual environment project, jadi semua dependency dan interpreter yang dipakai sesuai konfigurasi tim. Kenapa ini penting? Karena banyak error demo biasanya muncul hanya karena interpreter salah atau package terbaca dari environment lain. Dengan langkah ini, kita kunci fondasi eksekusi agar stabil sebelum masuk ke pipeline AI."
+
+#### Command 2 — Orchestrator quick demo
+
+```powershell
+python .\main_orchestrator.py --quick-case --no-mlflow
+```
+
+**Narasi (±90 detik):**
+"Sekarang kita jalankan orchestrator dalam mode quick-case supaya demonstrasi cepat dan fokus ke alur inti. Sistem akan memproses satu kasus usulan warga menggunakan rangkaian multi-agent: klasifikasi, mitigasi risiko, analisis sosial, dan estimasi ekonomi. Saya juga mengaktifkan no-mlflow agar output demo bersih, tanpa noise logging ke dashboard. Jadi yang audiens lihat benar-benar value proses pengambilan keputusan AI, dari input usulan sampai kesimpulan eksekutif."
+
+#### Command 3 — Evaluasi cepat (tanpa API eksternal)
+
+```powershell
+python .\run_auto_evaluation.py --dry-run --no-mlflow --sample-size 1
+```
+
+**Narasi (±75 detik):**
+"Di langkah terakhir, saya tunjukkan jalur evaluasi. Mode dry-run dipakai agar tidak tergantung call API eksternal, jadi aman untuk kondisi jaringan apa pun saat presentasi. Dengan sample-size 1, proses selesai cepat tetapi tetap merepresentasikan alur audit kualitas output model. No-mlflow tetap aktif agar sesi demo tidak mencemari eksperimen produksi. Ini menunjukkan bahwa sistem punya mode operasional yang fleksibel: bisa untuk demo cepat, debugging, maupun mode produksi penuh."
+
+#### Fallback line (jika ada kendala live)
+
+**Narasi singkat cadangan (±20 detik):**
+"Kalau jaringan atau layanan eksternal sedang tidak stabil, kita tetap bisa validasi seluruh alur dengan mode dry-run, sehingga demo tetap berjalan dan objektif menampilkan pipeline sistem."
+
 ---
 
 ## Catatan Operasional
