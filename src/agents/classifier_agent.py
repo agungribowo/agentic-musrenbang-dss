@@ -18,7 +18,7 @@ class ClassifierAgent:
         print("[Agen Klasifikasi] Membangunkan agen...")
         
         # 1. Panggil pengaturan (Koneksi DagsHub & Set Client Gemini)
-        settings.setup_environment()
+        settings.setup_mlflow_tracking()
         
         # 2. Ambil "Otak" (Client LLM) dari settings
         self.client = settings.gemini_client

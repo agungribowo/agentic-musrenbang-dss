@@ -20,7 +20,7 @@ class MitigationAgent:
         print("[Agen Mitigasi] Membangunkan agen analis risiko...")
         
         # 1. Panggil pengaturan koneksi
-        settings.setup_environment()
+        settings.setup_mlflow_tracking()
         
         # 2. Ambil "Otak" (Client LLM) dari settings
         self.client = settings.gemini_client
