@@ -1,130 +1,119 @@
-import pandas as pd
+import requests
+import json
 import mlflow
-import time # Kunci untuk mengatasi Error 429
+
+# Import konfigurasi SSoT
 import src.config.settings as settings
-from src.agents.mitigation_agent import MitigationAgent
 
-# Inisialisasi
-settings.setup_environment()
-client = settings.gemini_client
-model_judge = settings.DEFAULT_LLM_MODEL 
-
-agen_terdakwa = MitigationAgent()
-
-def llm_judge_audit(keluhan, hasil_agen, kriteria_rubrik):
-    prompt_hakim = f"""
-    Anda adalah AUDITOR KUALITAS AI yang objektif.
-    TUGAS: Nilai kinerja Agen Mitigasi berdasarkan keluhan warga dan output yang dia hasilkan.
-    
-    INPUT:
-    1. Keluhan Warga: "{keluhan}"
-    2. Output Agen Mitigasi: "{hasil_agen}"
-    3. Rubrik Acuan: "{kriteria_rubrik}"
-    
-    PERTANYAAN AUDIT:
-    1. Apakah Agen memberikan skor yang masuk akal sesuai rubrik?
-    2. Apakah alasan Agen logis dan langsung menjawab keluhan?
-    
-    FORMAT JAWABAN JSON:
-    {{
-        "score_accuracy": 5,
-        "reasoning_quality": 5,
-        "audit_note": "Tuliskan komentar singkat maksimal 1 kalimat."
-    }}
+def evaluate_with_llama(agent_name, user_query, agent_response, ground_truth):
     """
+    Memanggil Ollama REST API menggunakan konfigurasi dari settings.py.
+    """
+    prompt = f"""
+    Anda adalah Auditor Ahli Perencanaan Pembangunan (LLM-as-a-Judge) di Kelurahan Nusukan, Surakarta.
+    Tugas Anda mengevaluasi respon agen ({agent_name}) terhadap usulan Musrenbang warga.
     
-    try:
-        response = client.models.generate_content(
-            model=model_judge,
-            contents=prompt_hakim,
-            # Memaksa output JSON
-            config={'response_mime_type': 'application/json'} 
-        )
-        return response.parsed # Otomatis menjadi dictionary Python
-    except Exception as e:
-        print(f"\n[!] Gagal memanggil Hakim: {e}")
-        # Jika gagal, kembalikan nilai default agar program tidak crash
-        return {"score_accuracy": 0, "reasoning_quality": 0, "audit_note": "Gagal karena limitasi API."}
+    Usulan Warga: "{user_query}"
+    Respon Agen: "{agent_response}"
+    Konteks/Ground Truth: "{ground_truth}"
+    
+    Berikan penilaian metrik (skala 1-10) untuk:
+    1. relevance_score: Relevansi respon agen dengan nomenklatur/konteks.
+    2. accuracy_score: Keakuratan skor agen dibandingkan ground truth.
+    3. reasoning_score: Kualitas alasan agen.
+    
+    OUTPUT HARUS berformat JSON dengan key: "relevance_score", "accuracy_score", "reasoning_score", dan "feedback".
+    """
 
-test_cases = [
-    {
-        "kasus": "Pak, ada pot bunga pecah di depan balai RW, tolong diganti biar cantik.",
-        "klasifikasi_konteks": "Pemeliharaan taman"
-    },
-    {
-        "kasus": "Jalan berlubang sedikit di gang buntu, tidak membahayakan tapi kurang nyaman.",
-        "klasifikasi_konteks": "Pemeliharaan jalan lingkungan"
-    },
-    {
-        "kasus": "Tanggul sungai jebol, air mulai masuk rumah setinggi lutut, arus deras, banyak lansia terjebak.",
-        "klasifikasi_konteks": "Penanggulangan bencana alam"
+    payload = {
+        "model": settings.OLLAMA_JUDGE_MODEL,
+        "prompt": prompt,
+        "format": "json",
+        "stream": False
     }
-]
 
-print("\n[AUDITOR] Memulai Audit Kinerja Agen Mitigasi...")
-results = []
+    try:
+        # Request ke Localhost Ollama (Zero RPM Limit)
+        response = requests.post(settings.OLLAMA_API_URL, json=payload, timeout=120)
+        response.raise_for_status()
+        
+        result_text = response.json().get("response", "{}")
+        eval_metrics = json.loads(result_text)
+        return eval_metrics
+        
+    except requests.exceptions.RequestException as e:
+        print(f"[ERROR] Koneksi ke Ollama gagal: {e}")
+        return None
+    except json.JSONDecodeError:
+        print(f"[ERROR] Ollama tidak mengembalikan JSON yang valid. Output: {result_text}")
+        return None
 
-mlflow.set_experiment("Eksperimen_99_Evaluasi_Judge")
+def main():
+    print("=====================================================")
+    print("[INFO] Memulai Pipeline Evaluasi (LLM-as-a-Judge)")
+    print("=====================================================")
+    
+    # 1. Inisialisasi MLflow Tracking
+    settings.setup_mlflow_tracking()
+    mlflow.set_experiment("Evaluasi-Agen-Musrenbang")
+    
+    # 2. Mock Data Log (Simulasi hasil dari main_orchestrator.py)
+    mock_logs = [
+        {
+            "agent": "sociology_agent",
+            "query": "Pembangunan poskamling di RW 03 Nusukan karena rawan curanmor",
+            "response": "Skor Dampak: 8. Terkonfirmasi dengan data isu strategis keamanan Nusukan.",
+            "ground_truth": "RW 03 Nusukan memiliki tingkat curanmor tinggi. Pembangunan poskamling sangat valid."
+        },
+        {
+            "agent": "mitigation_agent",
+            "query": "Perbaikan talud sungai anyar yang longsor",
+            "response": "Skor Bahaya: 9. Mengancam keselamatan warga di bantaran.",
+            "ground_truth": "Talud sungai anyar kritis dan berisiko longsor susulan. Prioritas mitigasi utama."
+        }
+    ]
 
-with mlflow.start_run(run_name="Batch_Audit_02_Dengan_Jeda"):
-    for i, data in enumerate(test_cases):
-        print(f"\n==============================")
-        print(f"--- Audit Kasus #{i+1} ---")
-        print(f"==============================")
+    # 3. Eksekusi Evaluasi
+    with mlflow.start_run(run_name="Evaluasi_Llama3_Local"):
+        # Log parameter arsitektur
+        mlflow.log_param("judge_model", settings.OLLAMA_JUDGE_MODEL)
+        mlflow.log_param("main_agent_model", settings.DEFAULT_LLM_MODEL)
+        mlflow.log_param("evaluation_backend", "Ollama_WSL_Local")
+
+        total_accuracy = 0
+        total_relevance = 0
         
-        # 1. Jalankan Agen Terdakwa
-        output_agen = agen_terdakwa.analyze_risk(
-            data["kasus"], 
-            data["klasifikasi_konteks"], 
-            run_name=f"SubRun_{i}"
-        )
-        
-        # --- REM TANGAN PERTAMA ---
-        print("\n[SISTEM] Menunggu 15 detik agar server Google/Gemini tidak kepanasan (Anti Rate-Limit)...")
-        time.sleep(15) 
-        
-        # 2. Panggil Sang Hakim
-        print("[HAKIM] Sedang menilai kinerja agen...")
-        penilaian = llm_judge_audit(
-            keluhan=data["kasus"],
-            hasil_agen=output_agen,
-            kriteria_rubrik="Skor 1-3 (Estetika), 4-6 (Kenyamanan), 7-8 (Bahaya Fisik), 9-10 (Ancaman Nyawa)"
-        )
-        
-        # Menampilkan penilaian jika bukan error limit (tipe dictionary)
-        if isinstance(penilaian, dict):
-            acc = penilaian.get('score_accuracy', 0)
-            reason = penilaian.get('reasoning_quality', 0)
-            note = penilaian.get('audit_note', 'Tidak ada catatan')
+        for idx, log in enumerate(mock_logs):
+            print(f"\n-> Mengaudit Agen: {log['agent']}")
+            metrics = evaluate_with_llama(log['agent'], log['query'], log['response'], log['ground_truth'])
             
-            print(f"   -> Nilai Akurasi: {acc}/5")
-            print(f"   -> Nilai Penalaran: {reason}/5")
-            print(f"   -> Catatan Hakim: {note}")
-            
-            results.append({
-                "kasus": data["kasus"],
-                "skor_akurasi": acc,
-                "skor_penalaran": reason,
-                "catatan_hakim": note
-            })
-        
-        # --- REM TANGAN KEDUA ---
-        if i < len(test_cases) - 1:
-            print("\n[SISTEM] Menunggu 15 detik sebelum memproses kasus berikutnya...")
-            time.sleep(15)
+            if metrics:
+                print(f"   Metrik Diterima: {metrics}")
+                
+                # Ekstraksi skor (fallback ke 0 jika gagal parsing)
+                acc_score = metrics.get("accuracy_score", 0)
+                rel_score = metrics.get("relevance_score", 0)
+                
+                # Log ke DagsHub
+                mlflow.log_metric(f"{log['agent']}_accuracy", acc_score, step=idx)
+                mlflow.log_metric(f"{log['agent']}_relevance", rel_score, step=idx)
+                
+                total_accuracy += acc_score
+                total_relevance += rel_score
 
-    # 3. Buat Laporan Tabel (DataFrame)
-    if results:
-        df_report = pd.DataFrame(results)
-        avg_acc = df_report["skor_akurasi"].mean()
-        
-        print("\n" + "="*50)
-        print(f"HASIL AKHIR AUDIT: Rata-rata Akurasi Agen = {avg_acc}/5.0")
-        print("="*50)
-        
-        # Simpan ke MLflow
-        df_report.to_csv("laporan_audit_agen.csv", index=False)
-        mlflow.log_artifact("laporan_audit_agen.csv")
-        mlflow.log_metric("average_accuracy", avg_acc)
-    else:
-        print("\n[!] Audit gagal diselesaikan karena masalah koneksi/limit.")
+        # 4. Kalkulasi & Log Rata-rata Keseluruhan
+        if mock_logs:
+            avg_acc = total_accuracy / len(mock_logs)
+            avg_rel = total_relevance / len(mock_logs)
+            mlflow.log_metric("average_system_accuracy", avg_acc)
+            mlflow.log_metric("average_system_relevance", avg_rel)
+            
+            print("\n=====================================================")
+            print(f"[SUCCESS] Evaluasi Selesai.")
+            print(f"-> Rata-rata Akurasi  : {avg_acc}/10")
+            print(f"-> Rata-rata Relevansi: {avg_rel}/10")
+            print("[INFO] Semua metrik telah dikirim ke DagsHub.")
+            print("=====================================================")
+
+if __name__ == "__main__":
+    main()
