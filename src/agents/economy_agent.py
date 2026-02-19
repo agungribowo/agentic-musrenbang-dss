@@ -1,5 +1,6 @@
 import os
 import sys
+from contextlib import nullcontext
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
@@ -14,18 +15,22 @@ class EconomyAgent:
     Bertugas mengklasifikasikan usulan ke dalam skala Mikro, Menengah, atau Makro,
     serta memberikan Skor Kelayakan Finansial (1-10).
     """
-    def __init__(self):
+    def __init__(self, enable_mlflow=True):
         print("[Agen Ekonomi] Membangunkan agen perencana anggaran...")
-        settings.setup_environment()
-        self.client = settings.gemini_client
+        self.enable_mlflow = enable_mlflow
+        if self.enable_mlflow:
+            settings.setup_mlflow_tracking()
+        self.client = settings.groq_client
         self.model_name = settings.DEFAULT_LLM_MODEL
 
     def analyze_budget(self, keluhan_warga, hasil_klasifikasi, analisis_sosiologi, run_name="Uji_Coba_Ekonomi"):
         print(f"\n[Agen Ekonomi] Menghitung proksi anggaran untuk keluhan: '{keluhan_warga}'")
 
-        mlflow.set_experiment("Eksperimen_04_Agen_Ekonomi")
-        
-        with mlflow.start_run(run_name=run_name):
+        if self.enable_mlflow:
+            mlflow.set_experiment("Eksperimen_04_Agen_Ekonomi")
+
+        run_context = mlflow.start_run(run_name=run_name) if self.enable_mlflow else nullcontext()
+        with run_context:
             
             PROMPT_VERSION = "v1.0_BudgetScaling"
             prompt = f"""
@@ -57,11 +62,17 @@ class EconomyAgent:
             """
 
             print("[Agen Ekonomi] Sedang menghitung rasio Cost-Benefit (Biaya vs Manfaat)...")
-            response = self.client.models.generate_content(
+            response = self.client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
                 model=self.model_name,
-                contents=prompt
+                temperature=0.1,
             )
-            hasil_akhir = response.text
+            hasil_akhir = response.choices[0].message.content
 
             print("\n==========================================")
             print("LAPORAN ESTIMASI ANGGARAN (AGEN EKONOMI)")
@@ -69,15 +80,18 @@ class EconomyAgent:
             print(hasil_akhir)
             print("==========================================")
 
-            print("\n[Agen Ekonomi] Menyimpan metrik finansial ke DagsHub...")
-            mlflow.log_param("model_llm", self.model_name)
-            mlflow.log_param("prompt_version", PROMPT_VERSION)
-            
-            mlflow.log_text(keluhan_warga, "1_input_warga.txt")
-            mlflow.log_text(analisis_sosiologi, "2_input_sosiologi.txt")
-            mlflow.log_text(hasil_akhir, "3_output_anggaran.txt")
-            
-            print("[Agen Ekonomi] Selesai! Log tersimpan aman di Cloud.")
+            if self.enable_mlflow:
+                print("\n[Agen Ekonomi] Menyimpan metrik finansial ke DagsHub...")
+                mlflow.log_param("model_llm", self.model_name)
+                mlflow.log_param("prompt_version", PROMPT_VERSION)
+                
+                mlflow.log_text(keluhan_warga, "1_input_warga.txt")
+                mlflow.log_text(analisis_sosiologi, "2_input_sosiologi.txt")
+                mlflow.log_text(hasil_akhir, "3_output_anggaran.txt")
+                
+                print("[Agen Ekonomi] Selesai! Log tersimpan aman di Cloud.")
+            else:
+                print("[Agen Ekonomi] Mode no-mlflow aktif: log eksperimen dilewati.")
             
             return hasil_akhir
 

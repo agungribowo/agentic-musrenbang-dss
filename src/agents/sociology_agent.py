@@ -1,5 +1,6 @@
 import os
 import sys
+from contextlib import nullcontext
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
@@ -13,10 +14,12 @@ class SociologyAgent:
     Agen AI Ketiga: Ahli Sosiologi dan Perencanaan Wilayah.
     Bertugas memberikan Skor Dampak Sosial (1-10) berdasarkan Profil Demografi Kelurahan.
     """
-    def __init__(self):
+    def __init__(self, enable_mlflow=True):
         print("[Agen Sosiologi] Membangunkan agen analis dampak sosial...")
-        settings.setup_environment()
-        self.client = settings.gemini_client
+        self.enable_mlflow = enable_mlflow
+        if self.enable_mlflow:
+            settings.setup_mlflow_tracking()
+        self.client = settings.groq_client
         self.model_name = settings.DEFAULT_LLM_MODEL
 
         # ==========================================
@@ -35,9 +38,11 @@ class SociologyAgent:
     def analyze_social_impact(self, keluhan_warga, hasil_klasifikasi, skor_mitigasi, run_name="Uji_Coba_Sosiologi"):
         print(f"\n[Agen Sosiologi] Mengevaluasi luasan dampak dari keluhan: '{keluhan_warga}'")
 
-        mlflow.set_experiment("Eksperimen_03_Agen_Sosiologi")
-        
-        with mlflow.start_run(run_name=run_name):
+        if self.enable_mlflow:
+            mlflow.set_experiment("Eksperimen_03_Agen_Sosiologi")
+
+        run_context = mlflow.start_run(run_name=run_name) if self.enable_mlflow else nullcontext()
+        with run_context:
             
             PROMPT_VERSION = "v1.0_SocialImpactScoring"
             prompt = f"""
@@ -68,11 +73,17 @@ class SociologyAgent:
             """
 
             print("[Agen Sosiologi] Sedang membedah data demografi dan sebaran manfaat...")
-            response = self.client.models.generate_content(
+            response = self.client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
                 model=self.model_name,
-                contents=prompt
+                temperature=0.1,
             )
-            hasil_akhir = response.text
+            hasil_akhir = response.choices[0].message.content
 
             print("\n==========================================")
             print("LAPORAN DAMPAK SOSIAL (AGEN SOSIOLOGI)")
@@ -80,15 +91,18 @@ class SociologyAgent:
             print(hasil_akhir)
             print("==========================================")
 
-            print("\n[Agen Sosiologi] Menyimpan jejak analisis ke DagsHub...")
-            mlflow.log_param("model_llm", self.model_name)
-            mlflow.log_param("prompt_version", PROMPT_VERSION)
-            
-            mlflow.log_text(keluhan_warga, "1_input_warga.txt")
-            mlflow.log_text(self.profil_kelurahan, "2_input_profil_lokal.txt")
-            mlflow.log_text(hasil_akhir, "3_output_skor_sosial.txt")
-            
-            print("[Agen Sosiologi] Selesai! Log tersimpan aman di Cloud.")
+            if self.enable_mlflow:
+                print("\n[Agen Sosiologi] Menyimpan jejak analisis ke DagsHub...")
+                mlflow.log_param("model_llm", self.model_name)
+                mlflow.log_param("prompt_version", PROMPT_VERSION)
+                
+                mlflow.log_text(keluhan_warga, "1_input_warga.txt")
+                mlflow.log_text(self.profil_kelurahan, "2_input_profil_lokal.txt")
+                mlflow.log_text(hasil_akhir, "3_output_skor_sosial.txt")
+                
+                print("[Agen Sosiologi] Selesai! Log tersimpan aman di Cloud.")
+            else:
+                print("[Agen Sosiologi] Mode no-mlflow aktif: log eksperimen dilewati.")
             
             return hasil_akhir
 

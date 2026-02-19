@@ -1,5 +1,6 @@
 import os
 import sys
+import argparse
 
 # Memastikan Python bisa membaca seluruh modul di dalam folder src/
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -15,25 +16,36 @@ from src.agents.mitigation_agent import MitigationAgent
 from src.agents.sociology_agent import SociologyAgent
 from src.agents.economy_agent import EconomyAgent
 
+DEFAULT_CASE_ID = "USULAN_RW11_001"
+DEFAULT_CASE_TEXT = "Pak, tanggul sungai di batas RW 11 itu sudah retak panjang, kalau hujan deras airnya mulai rembes ke jalanan kampung. Warga takut kalau sampai jebol bisa merendam satu RW seperti tahun lalu."
+QUICK_CASE_ID = "QUICK_CASE_001"
+QUICK_CASE_TEXT = "Lampu penerangan jalan di gang RW 09 mati total selama seminggu dan warga khawatir rawan kecelakaan malam hari."
+
 class MusrenbangOrchestrator:
     """
     Sistem Inti: Mengatur alur kerja Multi-Agent System.
     Menerima input warga, mengoperkannya ke 4 agen secara berurutan, 
     dan mencetak Laporan Eksekutif.
     """
-    def __init__(self):
+    def __init__(self, enable_mlflow=True):
+        self.enable_mlflow = enable_mlflow
+        mode_labels = ["NORMAL"]
+        if not self.enable_mlflow:
+            mode_labels.append("NO-MLFLOW")
+
         print("\n=======================================================")
         print("MEMULAI SISTEM PENDUKUNG KEPUTUSAN (DSS) MUSRENBANGKEL")
         print("=======================================================")
+        print(f"⚙️ [MODE] {' | '.join(mode_labels)}")
         
         # Inisialisasi semua agen (Mereka akan otomatis memuat model dan database RAG)
-        self.agen_klasifikasi = ClassifierAgent()
-        self.agen_mitigasi = MitigationAgent()
-        self.agen_sosiologi = SociologyAgent()
-        self.agen_ekonomi = EconomyAgent()
+        self.agen_klasifikasi = ClassifierAgent(enable_mlflow=self.enable_mlflow)
+        self.agen_mitigasi = MitigationAgent(enable_mlflow=self.enable_mlflow)
+        self.agen_sosiologi = SociologyAgent(enable_mlflow=self.enable_mlflow)
+        self.agen_ekonomi = EconomyAgent(enable_mlflow=self.enable_mlflow)
         
         # Otak utama untuk merangkum laporan akhir
-        self.client = settings.gemini_client
+        self.client = settings.groq_client
         self.model_name = settings.DEFAULT_LLM_MODEL
 
     def process_usulan(self, keluhan_warga, id_usulan="USULAN_001"):
@@ -97,11 +109,17 @@ class MusrenbangOrchestrator:
         Gunakan gaya bahasa birokrasi pemerintahan yang profesional. Sebutkan secara singkat skor risikonya dan kelayakan anggarannya.
         """
 
-        response = self.client.models.generate_content(
+        response = self.client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt_kesimpulan,
+                }
+            ],
             model=self.model_name,
-            contents=prompt_kesimpulan
+            temperature=0.1,
         )
-        kesimpulan_final = response.text
+        kesimpulan_final = response.choices[0].message.content
         
         waktu_selesai = time.time()
         durasi = round(waktu_selesai - waktu_mulai, 2)
@@ -128,16 +146,39 @@ class MusrenbangOrchestrator:
         print("="*60)
 
         # Menyimpan hasil akhir sistem ke DagsHub
-        mlflow.set_experiment("Eksperimen_00_Sistem_Utama_Orchestrator")
-        with mlflow.start_run(run_name=f"{id_usulan}_Final_Report"):
-            mlflow.log_text(kesimpulan_final, "Laporan_Eksekutif_Final.txt")
+        if self.enable_mlflow:
+            mlflow.set_experiment("Eksperimen_00_Sistem_Utama_Orchestrator")
+            with mlflow.start_run(run_name=f"{id_usulan}_Final_Report"):
+                mlflow.log_text(kesimpulan_final, "Laporan_Eksekutif_Final.txt")
+        else:
+            print("[ORKESTRATOR] Mode no-mlflow aktif: log final tidak dikirim ke DagsHub.")
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Orchestrator Multi-Agent Musrenbang DSS")
+    parser.add_argument(
+        "--no-mlflow",
+        action="store_true",
+        help="Matikan semua tracking MLflow/DagsHub untuk eksekusi lokal."
+    )
+    parser.add_argument(
+        "--quick-case",
+        action="store_true",
+        help="Gunakan 1 kasus singkat bawaan untuk uji operasional harian yang lebih cepat."
+    )
+    return parser.parse_args()
 
 if __name__ == "__main__":
+    args = parse_args()
+
     # Inisialisasi Sistem
-    sistem_dss = MusrenbangOrchestrator()
-    
-    # KASUS UJI COBA TERAKHIR KITA
-    # Mari kita uji dengan kasus yang "abu-abu" (Penting tapi mungkin butuh biaya mahal)
-    kasus_warga = "Pak, tanggul sungai di batas RW 11 itu sudah retak panjang, kalau hujan deras airnya mulai rembes ke jalanan kampung. Warga takut kalau sampai jebol bisa merendam satu RW seperti tahun lalu."
-    
-    sistem_dss.process_usulan(kasus_warga, id_usulan="USULAN_RW11_001")
+    sistem_dss = MusrenbangOrchestrator(enable_mlflow=not args.no_mlflow)
+
+    if args.quick_case:
+        print("[ORKESTRATOR] QUICK-CASE aktif: menggunakan kasus singkat bawaan.")
+        kasus_warga = QUICK_CASE_TEXT
+        id_usulan = QUICK_CASE_ID
+    else:
+        kasus_warga = DEFAULT_CASE_TEXT
+        id_usulan = DEFAULT_CASE_ID
+
+    sistem_dss.process_usulan(kasus_warga, id_usulan=id_usulan)

@@ -1,5 +1,6 @@
 import os
 import sys
+from contextlib import nullcontext
 
 # ==========================================
 # PENGATURAN PATH OTOMATIS
@@ -16,25 +17,29 @@ class MitigationAgent:
     Agen AI Kedua: Ahli Mitigasi Bencana dan Penilaian Risiko.
     Bertugas memberikan Skor Bahaya (1-10) untuk menentukan urgensi usulan.
     """
-    def __init__(self):
+    def __init__(self, enable_mlflow=True):
         print("[Agen Mitigasi] Membangunkan agen analis risiko...")
+        self.enable_mlflow = enable_mlflow
         
         # 1. Panggil pengaturan koneksi
-        settings.setup_mlflow_tracking()
+        if self.enable_mlflow:
+            settings.setup_mlflow_tracking()
         
         # 2. Ambil "Otak" (Client LLM) dari settings
-        self.client = settings.gemini_client
+        self.client = settings.groq_client
         self.model_name = settings.DEFAULT_LLM_MODEL
 
     def analyze_risk(self, keluhan_warga, hasil_klasifikasi, run_name="Uji_Coba_Mitigasi"):
         print(f"\n[Agen Mitigasi] Mengevaluasi tingkat bahaya dari keluhan: '{keluhan_warga}'")
 
         # Membuat eksperimen baru khusus untuk Agen Mitigasi di MLflow
-        mlflow.set_experiment("Eksperimen_02_Agen_Mitigasi")
+        if self.enable_mlflow:
+            mlflow.set_experiment("Eksperimen_02_Agen_Mitigasi")
 
-        is_nested_run = mlflow.active_run() is not None
-        
-        with mlflow.start_run(run_name=run_name, nested=is_nested_run):
+        is_nested_run = mlflow.active_run() is not None if self.enable_mlflow else False
+        run_context = mlflow.start_run(run_name=run_name, nested=is_nested_run) if self.enable_mlflow else nullcontext()
+
+        with run_context:
             
             # TAHAP 1: Menyusun Prompt Evaluasi Risiko
             PROMPT_VERSION = "v1.0_RiskScoring"
@@ -64,11 +69,17 @@ class MitigationAgent:
 
             # TAHAP 2: Berpikir dan Mengambil Keputusan
             print("[Agen Mitigasi] Sedang mengkalkulasi matriks bahaya dan urgensi...")
-            response = self.client.models.generate_content(
+            response = self.client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
                 model=self.model_name,
-                contents=prompt
+                temperature=0.1,
             )
-            hasil_akhir = response.text
+            hasil_akhir = response.choices[0].message.content
 
             print("\n==========================================")
             print("LAPORAN PENILAIAN RISIKO (AGEN MITIGASI)")
@@ -77,17 +88,20 @@ class MitigationAgent:
             print("==========================================")
 
             # TAHAP 3: Pencatatan Eksperimen ke DagsHub
-            print("\n[Agen Mitigasi] Menyimpan log skoring ke DagsHub...")
-            mlflow.log_param("model_llm", self.model_name)
-            mlflow.log_param("prompt_version", PROMPT_VERSION)
-            
-            # Kita catat masukannya
-            mlflow.log_text(keluhan_warga, "1_input_warga.txt")
-            mlflow.log_text(hasil_klasifikasi, "2_input_klasifikasi.txt")
-            # Kita catat keputusannya
-            mlflow.log_text(hasil_akhir, "3_output_skoring.txt")
-            
-            print("[Agen Mitigasi] Selesai! Log tersimpan aman di Cloud.")
+            if self.enable_mlflow:
+                print("\n[Agen Mitigasi] Menyimpan log skoring ke DagsHub...")
+                mlflow.log_param("model_llm", self.model_name)
+                mlflow.log_param("prompt_version", PROMPT_VERSION)
+                
+                # Kita catat masukannya
+                mlflow.log_text(keluhan_warga, "1_input_warga.txt")
+                mlflow.log_text(hasil_klasifikasi, "2_input_klasifikasi.txt")
+                # Kita catat keputusannya
+                mlflow.log_text(hasil_akhir, "3_output_skoring.txt")
+                
+                print("[Agen Mitigasi] Selesai! Log tersimpan aman di Cloud.")
+            else:
+                print("[Agen Mitigasi] Mode no-mlflow aktif: log eksperimen dilewati.")
             
             return hasil_akhir
 
