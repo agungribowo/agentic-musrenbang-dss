@@ -27,6 +27,13 @@ DEFAULT_LLM_MODEL = "llama-3.3-70b-versatile"
 _TRACKING_SETUP_DONE = False
 
 # ==========================================
+# SIMULATED COST TRACKING (CLAWWORK LOGIC)
+# ==========================================
+# Estimasi biaya untuk model Llama-3.3-70b-versatile di Groq (dalam USD)
+COST_PER_1M_INPUT_TOKENS = 0.59
+COST_PER_1M_OUTPUT_TOKENS = 0.79
+
+# ==========================================
 # INISIALISASI KLIEN (SINGLETON)
 # ==========================================
 print("[System] Memuat konfigurasi utama (Groq Engine)...")

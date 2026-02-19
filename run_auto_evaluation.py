@@ -7,7 +7,6 @@ import requests
 import pandas as pd
 import mlflow
 
-# Konfigurasi Path
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(CURRENT_DIR)
 
@@ -53,65 +52,46 @@ def build_dry_run_response(ground_truth_kamus):
         f"NOMENKLATUR TERPILIH: {ground_truth_kamus}\n"
         "DINAS TERKAIT: (SIMULASI DRY-RUN)\n"
         "ALASAN PENALARAN: Output simulasi untuk pengujian pipeline tanpa API eksternal."
-    )
+    ), 0.0
 
 def build_dry_run_metrics():
-    return {
-        "accuracy_score": 10,
-        "reasoning_score": 9,
-        "feedback": "Simulasi dry-run: metrik statis untuk validasi alur."
-    }
+    return {"accuracy_score": 10, "reasoning_score": 9, "feedback": "Simulasi dry-run statis."}
+
+def normalize_classifier_result(classifier_result):
+    if isinstance(classifier_result, tuple):
+        hasil_text = str(classifier_result[0]) if len(classifier_result) > 0 else ""
+        cost_usd = float(classifier_result[1]) if len(classifier_result) > 1 else 0.0
+        return hasil_text, cost_usd
+
+    return str(classifier_result), 0.0
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Pipeline evaluasi otomatis klasifikasi Musrenbang")
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Jalankan pipeline tanpa memanggil API Groq/Ollama (pakai output simulasi)."
-    )
-    parser.add_argument(
-        "--sample-size",
-        type=int,
-        default=15,
-        help="Jumlah baris data yang dievaluasi (default: 15)."
-    )
-    parser.add_argument(
-        "--no-mlflow",
-        action="store_true",
-        help="Matikan semua tracking MLflow/DagsHub untuk debugging lokal cepat."
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Jalankan pipeline tanpa memanggil API.")
+    parser.add_argument("--sample-size", type=int, default=15, help="Jumlah baris data yang dievaluasi.")
+    parser.add_argument("--no-mlflow", action="store_true", help="Matikan tracking MLflow.")
     return parser.parse_args()
 
 def main():
     args = parse_args()
     dry_run = args.dry_run
     enable_mlflow = not args.no_mlflow
-    mode_labels = []
-    mode_labels.append("DRY-RUN" if dry_run else "NORMAL")
-    if not enable_mlflow:
-        mode_labels.append("NO-MLFLOW")
-
+    
     print("=====================================================")
     print("🚀 [INFO] MEMULAI PIPELINE EVALUASI OTOMATIS (MASSAL)")
     print("=====================================================")
-    print(f"⚙️ [MODE] {' | '.join(mode_labels)}")
-    if dry_run:
-        print("🧪 [MODE] DRY-RUN aktif: API Groq/Ollama tidak dipanggil.")
-    if not enable_mlflow:
-        print("📴 [MODE] NO-MLFLOW aktif: tracking DagsHub/MLflow dimatikan.")
     
     if enable_mlflow:
         settings.setup_mlflow_tracking()
     agen_klasifikasi = None if dry_run else ClassifierAgent(enable_mlflow=enable_mlflow)
     
-    print(f"\n[INFO] Membaca dataset dari: {CSV_PATH}")
     try:
         try:
             df = pd.read_csv(CSV_PATH, sep=';')
             if 'KAMUS USULAN' not in df.columns:
                 df = pd.read_csv(CSV_PATH, sep=',')
-        except Exception as e:
-            print(f"[ERROR] Gagal membaca CSV: {e}")
+        except Exception:
+            print("[ERROR] Gagal membaca CSV.")
             return
             
         kolom_masalah = [col for col in df.columns if 'PRIORITAS PERMASALAHAN' in col][0]
@@ -119,7 +99,6 @@ def main():
         
         sample_size = max(args.sample_size, 1)
         df_sample = df.head(sample_size)
-        print(f"[INFO] Dataset siap! Mengaudit {len(df_sample)} kasus usulan warga...")
         
     except Exception as e:
         print(f"[ERROR] Dataset bermasalah: {e}")
@@ -130,9 +109,9 @@ def main():
     
     total_accuracy = 0
     total_reasoning = 0
+    total_batch_cost = 0.0  # Akumulator Biaya
     berhasil = 0
 
-    # 3. Looping Ujian Otomatis (TANPA mlflow.start_run global agar tidak bentrok)
     for index, row in df_sample.iterrows():
         kasus = str(row[kolom_masalah])
         lokasi = f"RW {row['RW']}" if 'RW' in df.columns else ""
@@ -144,22 +123,23 @@ def main():
         # --- STEP A: Agen Utama Bekerja (Groq) ---
         try:
             if dry_run:
-                hasil_agen = build_dry_run_response(ground_truth)
+                hasil_agen, cost_usd = build_dry_run_response(ground_truth)
             else:
-                # Ini akan otomatis membuka dan menutup run MLflow-nya sendiri sesuai Blueprint
-                hasil_agen = agen_klasifikasi.analyze(kasus_lengkap, run_name=f"Eval_Row_{index}")
+                classifier_result = agen_klasifikasi.analyze(kasus_lengkap, run_name=f"Eval_Row_{index}")
+                hasil_agen, cost_usd = normalize_classifier_result(classifier_result)
+            
+            total_batch_cost += cost_usd
+                
         except Exception as e:
-            print(f"[!] Groq API Error (Mungkin Limit): {e}")
-            print("[!] Menunggu 30 detik untuk pendinginan...")
+            print(f"[!] Groq API Error: {e}")
             time.sleep(30)
             continue 
 
         # --- STEP B: Agen Hakim Menilai (Ollama Lokal) ---
         if dry_run:
-            print("   -> [HAKIM] DRY-RUN: memakai metrik simulasi lokal...")
             metrics = build_dry_run_metrics()
         else:
-            print("   -> [HAKIM] Memanggil Ollama Local untuk membandingkan hasil...")
+            print("   -> [HAKIM] Memanggil Ollama Local untuk mengevaluasi...")
             metrics = evaluate_classifier_with_llama(kasus_lengkap, hasil_agen, ground_truth)
         
         if metrics:
@@ -167,9 +147,7 @@ def main():
             reason_score = metrics.get("reasoning_score", 0)
             
             print(f"   -> Akurasi: {acc_score}/10 | Penalaran: {reason_score}/10")
-            print(f"   -> Catatan Hakim: {metrics.get('feedback', '')}")
             
-            # Kita buat rekaman baru KHUSUS untuk hasil Hakim agar terpisah dan rapi
             if enable_mlflow:
                 with mlflow.start_run(run_name=f"Hakim_Row_{index}"):
                     mlflow.log_metric("classifier_accuracy", acc_score)
@@ -179,11 +157,7 @@ def main():
             total_reasoning += reason_score
             berhasil += 1
         
-        # --- REM TANGAN API ---
-        if dry_run:
-            print("   -> [SISTEM] DRY-RUN: tanpa jeda API.")
-        else:
-            print("   -> [SISTEM] Jeda 12 detik mencegah Groq Rate Limit...")
+        if not dry_run:
             time.sleep(12)
 
     # 4. Kalkulasi Rapor Akhir
@@ -191,23 +165,19 @@ def main():
         avg_acc = round(total_accuracy / berhasil, 2)
         avg_res = round(total_reasoning / berhasil, 2)
         
-        # Rekaman final untuk nilai rata-rata keseluruhan
         if enable_mlflow:
             with mlflow.start_run(run_name="KESIMPULAN_RATA_RATA_EVALUASI"):
                 mlflow.log_param("judge_model", settings.OLLAMA_JUDGE_MODEL)
                 mlflow.log_param("dataset_size", len(df_sample))
                 mlflow.log_metric("average_classifier_accuracy", avg_acc)
                 mlflow.log_metric("average_classifier_reasoning", avg_res)
+                mlflow.log_metric("total_batch_simulated_cost_usd", total_batch_cost)
         
         print("\n" + "="*53)
-        print(f"🎉 [SUCCESS] EVALUASI MASSAL SELESAI ({berhasil} Kasus)")
-        print("="*53)
-        print(f"-> Rata-rata Akurasi Peta Kamus : {avg_acc}/10")
-        print(f"-> Rata-rata Kualitas Penalaran : {avg_res}/10")
-        if enable_mlflow:
-            print("[INFO] Semua data berhasil diunggah ke DagsHub!")
-        else:
-            print("[INFO] Mode no-mlflow: tidak ada data yang dikirim ke DagsHub.")
+        print(f"🎉 [SUCCESS] EVALUASI SELESAI ({berhasil} Kasus)")
+        print(f"-> Rata-rata Akurasi : {avg_acc}/10")
+        print(f"-> Rata-rata Penalaran : {avg_res}/10")
+        print(f"-> Total Biaya Simulasi: ${total_batch_cost:.4f}")
         print("="*53)
 
 if __name__ == "__main__":

@@ -84,6 +84,15 @@ class ClassifierAgent:
                     temperature=0.1, # Suhu rendah agar stabil dan tidak halusinasi
                 )
                 hasil_akhir = response.choices[0].message.content
+                
+                # --- TAMBAHAN CLAWWORK: Menangkap Token Langsung dari Groq ---
+                prompt_tokens = response.usage.prompt_tokens
+                completion_tokens = response.usage.completion_tokens
+                
+                # Menghitung Biaya Simulasi
+                cost_input = (prompt_tokens / 1_000_000) * settings.COST_PER_1M_INPUT_TOKENS
+                cost_output = (completion_tokens / 1_000_000) * settings.COST_PER_1M_OUTPUT_TOKENS
+                total_cost_usd = cost_input + cost_output
 
                 print("\n==========================================")
                 print("KEPUTUSAN AGEN KLASIFIKASI")
@@ -99,6 +108,11 @@ class ClassifierAgent:
                     mlflow.log_param("prompt_version", PROMPT_VERSION)
                     mlflow.log_param("api_vendor", "Groq")
                     
+                    # Log Ekonomi
+                    mlflow.log_metric("prompt_tokens", prompt_tokens)
+                    mlflow.log_metric("completion_tokens", completion_tokens)
+                    mlflow.log_metric("simulated_cost_usd", total_cost_usd)
+                    
                     mlflow.log_text(keluhan_warga, "1_input_warga.txt")
                     mlflow.log_text(prompt, "2_prompt_lengkap.txt")
                     mlflow.log_text(hasil_akhir, "3_output_keputusan.txt")
@@ -107,19 +121,22 @@ class ClassifierAgent:
                 else:
                     print("[Agen Klasifikasi] Mode no-mlflow aktif: log eksperimen dilewati.")
                 
-                return hasil_akhir
+                # Mengembalikan tuple berisi teks dan biayanya
+                return hasil_akhir, total_cost_usd
                 
             except Exception as e:
                 error_msg = f"Gagal memproses klasifikasi via Groq API: {e}"
                 print(f"[!] ERROR: {error_msg}")
                 if self.enable_mlflow:
                     mlflow.log_param("error", str(e))
-                return error_msg
+                return error_msg, 0.0
 
 # Blok pengujian lokal (Tetap dibiarkan, tidak akan mengganggu)
 if __name__ == "__main__":
     agen = ClassifierAgent()
     
     kasus = "Pak, jalan paving di gang RT 04 itu sudah hancur parah dan berlubang, kalau malam gelap gulita rawan ibu-ibu jatuh dari motor."
-    
-    agen.analyze(kasus, run_name="Tes_Jalan_Paving_Rusak")
+
+    hasil_text, biaya = agen.analyze(kasus, run_name="Tes_Jalan_Paving_Rusak")
+    print(f"\n[LOCAL TEST] Estimasi biaya simulasi: ${biaya:.4f}")
+    print(f"[LOCAL TEST] Panjang output: {len(str(hasil_text))} karakter")

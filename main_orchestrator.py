@@ -48,6 +48,19 @@ class MusrenbangOrchestrator:
         self.client = settings.groq_client
         self.model_name = settings.DEFAULT_LLM_MODEL
 
+    @staticmethod
+    def _normalize_classifier_output(classifier_result):
+        """
+        Kompatibilitas hasil `ClassifierAgent.analyze()`.
+        Mendukung format lama (str) dan format baru (tuple: text, cost_usd).
+        """
+        if isinstance(classifier_result, tuple):
+            hasil_text = str(classifier_result[0]) if len(classifier_result) > 0 else ""
+            estimated_cost = classifier_result[1] if len(classifier_result) > 1 else None
+            return hasil_text, estimated_cost
+
+        return str(classifier_result), None
+
     def process_usulan(self, keluhan_warga, id_usulan="USULAN_001"):
         print(f"\n\n[ORKESTRATOR] Memproses Dokumen {id_usulan}")
         print(f"[INPUT WARGA] : '{keluhan_warga}'\n")
@@ -59,9 +72,12 @@ class MusrenbangOrchestrator:
         # TAHAP 1: KLASIFIKASI KAMUS USULAN
         # ---------------------------------------------------------
         print(">>> Meneruskan ke Agen Klasifikasi...")
-        hasil_klasifikasi = self.agen_klasifikasi.analyze(
+        classifier_result = self.agen_klasifikasi.analyze(
             keluhan_warga, run_name=f"{id_usulan}_Klasifikasi"
         )
+        hasil_klasifikasi, biaya_klasifikasi = self._normalize_classifier_output(classifier_result)
+        if biaya_klasifikasi is not None:
+            print(f"[ORKESTRATOR] Estimasi biaya klasifikasi: ${biaya_klasifikasi:.4f}")
 
         # ---------------------------------------------------------
         # TAHAP 2: PENILAIAN RISIKO & BAHAYA
