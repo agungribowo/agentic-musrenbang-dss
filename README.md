@@ -65,23 +65,33 @@ Proyek ini dirancang untuk:
 ## Struktur Proyek
 
 ```text
-src/
-	agents/
-		classifier_agent.py
-		mitigation_agent.py
-		sociology_agent.py
-		economy_agent.py
-	tools/
-		rag_engine.py
-	config/
-		settings.py
-
-main_orchestrator.py
-run_auto_evaluation.py
-run_evaluation.py
-setup.ps1
-data/
-chroma_db/
+Agentic-Musrenbang-DSS/
+├── src/
+│   ├── agents/
+│   │   ├── classifier_agent.py     # Agen klasifikasi + estimasi biaya token
+│   │   ├── mitigation_agent.py     # Agen penilaian risiko/bahaya
+│   │   ├── sociology_agent.py      # Agen analisis dampak sosial
+│   │   └── economy_agent.py        # Agen estimasi skala anggaran
+│   ├── tools/
+│   │   └── rag_engine.py           # RAG engine (ChromaDB + embedding)
+│   ├── config/
+│   │   └── settings.py             # Konfigurasi model, API, MLflow/DagsHub
+│   └── utils/
+│       └── logger.py               # Utilitas logging internal
+├── data/
+│   ├── external/                   # Dataset sumber (CSV musrenbang/renstramas)
+│   ├── processed/                  # Data hasil proses (jika digunakan)
+│   └── raw/                        # Data mentah
+├── chroma_db/                      # Persisted vector store ChromaDB
+├── notebooks/
+│   └── 01_eda_data_warga.ipynb     # EDA awal data warga
+├── main_orchestrator.py            # Entry point sistem multi-agent end-to-end
+├── run_auto_evaluation.py          # Evaluasi massal otomatis (Groq + Ollama judge)
+├── run_evaluation.py               # Evaluasi skenario/benchmark tambahan
+├── setup.ps1                       # Bootstrap environment proyek di PowerShell
+├── requirements.txt                # Daftar dependency Python
+├── laporan_audit_agen.csv          # Output/rekap audit evaluasi
+└── README.md                       # Dokumentasi utama proyek
 ```
 
 ---
