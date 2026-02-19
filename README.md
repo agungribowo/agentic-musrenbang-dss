@@ -52,13 +52,36 @@ Proyek ini dirancang untuk:
 
 ## Alur Proses
 
-1. Input usulan warga masuk ke sistem.
-2. `ClassifierAgent` melakukan retrieval RAG + pemetaan nomenklatur.
-3. `MitigationAgent` memberi skor bahaya/urgensi.
-4. `SociologyAgent` menilai dampak sosial berbasis profil lokal.
-5. `EconomyAgent` mengestimasi skala anggaran dan kelayakan.
-6. Orchestrator menyusun kesimpulan eksekutif.
-7. Evaluator (`run_auto_evaluation.py`) mengaudit output dengan LLM judge.
+```text
+[Input Usulan Warga]
+	|
+	v
+[ClassifierAgent]
+RAG Retrieval (ChromaDB + Embedding)
++ Pemetaan Nomenklatur
+	|
+	v
+[MitigationAgent]
+Skor Bahaya / Urgensi
+	|
+	v
+[SociologyAgent]
+Skor Dampak Sosial
+	|
+	v
+[EconomyAgent]
+Skala Anggaran + Kelayakan Finansial
+	|
+	v
+[Main Orchestrator]
+Kesimpulan Eksekutif
+	|
+	+----------------------------+
+				     v
+			  [Auto Evaluation Pipeline]
+			  run_auto_evaluation.py
+			  Judge Model (Ollama llama3.1)
+```
 
 ---
 
@@ -131,32 +154,64 @@ Pastikan variabel berikut tersedia:
 
 ## Menjalankan Sistem
 
-### A) Jalankan orchestrator multi-agent
+| Command | Tujuan |
+|---|---|
+| `python .\main_orchestrator.py` | Menjalankan pipeline multi-agent penuh (normal mode). |
+| `python .\main_orchestrator.py --quick-case` | Uji cepat orchestrator dengan 1 kasus bawaan. |
+| `python .\main_orchestrator.py --no-mlflow` | Menjalankan orchestrator tanpa logging ke MLflow/DagsHub. |
+| `python .\main_orchestrator.py --quick-case --no-mlflow` | Demo operasional cepat, minim noise logging. |
+| `python .\run_auto_evaluation.py` | Menjalankan evaluasi massal default (dengan API eksternal). |
+| `python .\run_auto_evaluation.py --dry-run --sample-size 5` | Evaluasi cepat tanpa call API eksternal, sample terbatas. |
+| `python .\run_auto_evaluation.py --dry-run --no-mlflow --sample-size 5` | Smoke test paling ringan: tanpa API eksternal dan tanpa logging MLflow. |
+
+### Demo Checklist (Pre-flight Check)
+
+Sebelum live demo, pastikan 5 poin ini aman:
+
+1. **Interpreter benar**
+	- Terminal aktif di root project dan menggunakan Python dari `.venv`.
+
+2. **Environment siap**
+	- Jalankan `./setup.ps1 -SkipInstall` minimal sekali sebelum sesi.
+
+3. **Mode demo aman dipilih**
+	- Untuk presentasi non-teknis, gunakan `--quick-case` + `--no-mlflow` agar cepat dan minim noise.
+
+4. **Dependensi lokal evaluator aman**
+	- Jika hanya demo alur, gunakan `--dry-run` (tidak butuh call API Groq/Ollama).
+
+5. **Rencana fallback siap**
+	- Jika jaringan/limit bermasalah, langsung pindah ke command dry-run agar demo tetap jalan.
+
+### Demo Script 3 Menit (Live Presentasi)
+
+Gunakan urutan berikut agar demo stabil, cepat, dan minim risiko error saat tampil:
+
+1. **Aktifkan environment proyek**
 
 ```powershell
-python .\main_orchestrator.py
+./setup.ps1 -SkipInstall
 ```
 
-Mode operasi:
+2. **Jalankan demo orchestrator super cepat (tanpa noise logging)**
 
 ```powershell
-python .\main_orchestrator.py --no-mlflow
-python .\main_orchestrator.py --quick-case
 python .\main_orchestrator.py --quick-case --no-mlflow
 ```
 
-### B) Jalankan evaluasi massal
+3. **Jalankan demo evaluasi cepat 1 sampel (tanpa API eksternal)**
 
 ```powershell
-python .\run_auto_evaluation.py
+python .\run_auto_evaluation.py --dry-run --no-mlflow --sample-size 1
 ```
 
-Mode evaluasi cepat:
+4. **(Opsional, jika ingin tunjukkan mode produksi)**
 
 ```powershell
-python .\run_auto_evaluation.py --dry-run --sample-size 5
-python .\run_auto_evaluation.py --dry-run --no-mlflow --sample-size 5
+python .\main_orchestrator.py --quick-case
 ```
+
+> Rekomendasi presenter: jalankan langkah 1 sebelum sesi dimulai, lalu tampilkan langkah 2 dan 3 saat live demo.
 
 ---
 
