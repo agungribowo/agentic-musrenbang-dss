@@ -34,6 +34,13 @@ COST_PER_1M_INPUT_TOKENS = 0.59
 COST_PER_1M_OUTPUT_TOKENS = 0.79
 
 # ==========================================
+# KONSTANTA VALIDASI (SOFT THRESHOLD PoC v1)
+# ==========================================
+VALIDATION_THRESHOLD_ACCURACY = 8.0
+VALIDATION_THRESHOLD_RELEVANCE = 7.0
+VALIDATION_THRESHOLD_REASONING = 7.0
+
+# ==========================================
 # INISIALISASI KLIEN (SINGLETON)
 # ==========================================
 print("[System] Memuat konfigurasi utama (Groq Engine)...")

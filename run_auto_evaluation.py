@@ -146,12 +146,30 @@ def main():
             acc_score = metrics.get("accuracy_score", 0)
             reason_score = metrics.get("reasoning_score", 0)
             
+            # --- TAMBAHAN LOGIKA SOFT THRESHOLD PoC v1 ---
+            # Mengevaluasi apakah skor memenuhi standar minimal dari settings.py
+            is_passed = (
+                acc_score >= settings.VALIDATION_THRESHOLD_ACCURACY and
+                reason_score >= settings.VALIDATION_THRESHOLD_REASONING
+            )
+            status_teks = "LULUS" if is_passed else "GAGAL VALIDASI"
+            # ---------------------------------------------
+            
             print(f"   -> Akurasi: {acc_score}/10 | Penalaran: {reason_score}/10")
             
             if enable_mlflow:
                 with mlflow.start_run(run_name=f"Hakim_Row_{index}"):
+                    # Log skor mentah (Metrics asli Anda)
                     mlflow.log_metric("classifier_accuracy", acc_score)
                     mlflow.log_metric("classifier_reasoning", reason_score)
+                    
+                    # Log metrik Soft Threshold
+                    mlflow.log_metric("validation_pass", 1 if is_passed else 0)
+                    
+                    # Log parameter kebijakan yang digunakan (Audit Trail)
+                    mlflow.log_param("val_threshold_accuracy", settings.VALIDATION_THRESHOLD_ACCURACY)
+                    mlflow.log_param("val_threshold_reasoning", settings.VALIDATION_THRESHOLD_REASONING)
+                    mlflow.set_tag("validation_policy_version", "v1.0-soft")
             
             total_accuracy += acc_score
             total_reasoning += reason_score
