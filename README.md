@@ -328,6 +328,18 @@ python .\run_auto_evaluation.py --dry-run --no-mlflow --sample-size 1
 - Gunakan `--no-mlflow` saat debugging agar dashboard DagsHub tidak noisy.
 - Saat mode normal, evaluasi massal menggunakan jeda antar request untuk mengurangi risiko rate limit.
 
+### Change Log Harian (Append Otomatis)
+
+Gunakan script berikut agar entry changelog selalu **append** (bukan overwrite):
+
+```powershell
+./append_change_log.ps1 -Summary "Update evaluasi stochastic" -Scope "Evaluation pipeline" -Files "run_auto_evaluation.py,README.md" -Details "Tambah profile preset;Update docs" -VerifyCommand "python .\run_auto_evaluation.py --dry-run --sample-size 5" -VerifyResult "Sukses" -Notes "Session demo"
+```
+
+Catatan format input:
+- `-Files` dipisahkan koma.
+- `-Details` dipisahkan titik koma (`;`).
+
 ---
 
 ## Troubleshooting Singkat
