@@ -163,6 +163,36 @@ Pastikan variabel berikut tersedia:
 | `python .\run_auto_evaluation.py` | Menjalankan evaluasi massal default (dengan API eksternal). |
 | `python .\run_auto_evaluation.py --dry-run --sample-size 5` | Evaluasi cepat tanpa call API eksternal, sample terbatas. |
 | `python .\run_auto_evaluation.py --dry-run --no-mlflow --sample-size 5` | Smoke test paling ringan: tanpa API eksternal dan tanpa logging MLflow. |
+| `python .\run_auto_evaluation.py --dry-run --sampling-mode random --seed 42 --sample-size 10` | Evaluasi dengan sampel acak yang reproducible. |
+| `python .\run_auto_evaluation.py --dry-run --sampling-mode stratified_rw --sample-size 10` | Evaluasi dengan distribusi sampel lintas RW (lebih representatif wilayah). |
+| `python .\run_auto_evaluation.py --dry-run --sampling-mode stratified_kamus --sample-size 10` | Evaluasi dengan distribusi sampel lintas kategori usulan (`KAMUS USULAN`). |
+
+### Opsi Sampling Evaluasi
+
+- `--sampling-mode`:
+	- `head`: ambil baris teratas (baseline cepat, paling berisiko bias urutan data).
+	- `random`: acak dari seluruh data.
+	- `stratified_rw`: acak berstrata berdasarkan kolom `RW`.
+	- `stratified_kamus`: acak berstrata berdasarkan kolom `KAMUS USULAN`.
+- `--seed`: seed random untuk reproduksibilitas hasil sampling.
+
+### Audit Fairness di MLflow
+
+Saat evaluasi berjalan dengan MLflow aktif, sistem akan menulis ringkasan fairness pada run `KESIMPULAN_RATA_RATA_EVALUASI`:
+
+- **Parameter**: `sampling_mode`, `sampling_seed`, `sampling_strata_col`.
+- **Metric komposisi strata**:
+	- `sample_strata_unique`
+	- `sample_count_<strata_col>_<stratum>`
+- **Metric fairness kualitas**:
+	- `fairness_<strata_col>_<stratum>_pass_rate_pct`
+	- `fairness_<strata_col>_<stratum>_passed`
+	- `fairness_<strata_col>_<stratum>_failed`
+	- `fairness_<strata_col>_<stratum>_total`
+- **Artifact**:
+	- `sampling/strata_composition_<strata_col>.json`
+	- `sampling/fairness_summary_<strata_col>.json`
+	- `sampling/fairness_dashboard_<strata_col>.md`
 
 ### Demo Checklist (Pre-flight Check)
 

@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import re
 import argparse
 import requests
 import pandas as pd
@@ -124,6 +125,55 @@ def _stratified_sample(df, sample_size, strata_col, seed):
 
     return sampled_df
 
+
+def _to_metric_safe_key(raw_text, max_length=48):
+    cleaned = re.sub(r"[^0-9a-zA-Z_]+", "_", str(raw_text).strip().lower())
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+    if not cleaned:
+        cleaned = "unknown"
+    return cleaned[:max_length]
+
+
+def _build_strata_composition(df_sample, strata_col):
+    if not strata_col or strata_col not in df_sample.columns:
+        return None
+
+    value_counts = df_sample[strata_col].fillna("UNKNOWN").astype(str).value_counts().sort_index()
+    return {str(key): int(val) for key, val in value_counts.items()}
+
+
+def _build_fairness_summary(strata_eval_stats, strata_col):
+    if not strata_col or not strata_eval_stats:
+        return None, None
+
+    fairness_rows = []
+    for stratum_name, stats in sorted(strata_eval_stats.items(), key=lambda item: item[0]):
+        total = int(stats.get("total", 0))
+        passed = int(stats.get("passed", 0))
+        failed = max(total - passed, 0)
+        pass_rate = round((passed / total) * 100, 2) if total > 0 else 0.0
+        fairness_rows.append(
+            {
+                "stratum": str(stratum_name),
+                "total": total,
+                "passed": passed,
+                "failed": failed,
+                "pass_rate_pct": pass_rate,
+            }
+        )
+
+    if not fairness_rows:
+        return None, None
+
+    lines = [f"[FAIRNESS] Dashboard per strata ({strata_col}):"]
+    for row in fairness_rows:
+        lines.append(
+            f"- {row['stratum']}: total={row['total']} | lulus={row['passed']} | "
+            f"gagal={row['failed']} | pass_rate={row['pass_rate_pct']}%"
+        )
+
+    return fairness_rows, "\n".join(lines)
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Pipeline evaluasi otomatis klasifikasi Musrenbang")
     parser.add_argument("--dry-run", action="store_true", help="Jalankan pipeline tanpa memanggil API.")
@@ -149,6 +199,9 @@ def main():
     enable_mlflow = not args.no_mlflow
     mlflow = None
     val_threshold_accuracy, val_threshold_reasoning = get_validation_thresholds()
+    sampling_strata_col = None
+    sample_composition = None
+    strata_eval_stats = {}
     
     print("=====================================================")
     print("🚀 [INFO] MEMULAI PIPELINE EVALUASI OTOMATIS (MASSAL)")
@@ -188,6 +241,7 @@ def main():
                 print(f"[INFO] Sampling mode: random(fallback) | sample_size={sample_size} | seed={args.seed}")
             else:
                 df_sample = _stratified_sample(df, sample_size, "RW", args.seed)
+                sampling_strata_col = "RW"
                 print(
                     f"[INFO] Sampling mode: stratified_rw | strata={df_sample['RW'].nunique()} RW | "
                     f"sample_size={len(df_sample)} | seed={args.seed}"
@@ -199,6 +253,7 @@ def main():
                 print(f"[INFO] Sampling mode: random(fallback) | sample_size={sample_size} | seed={args.seed}")
             else:
                 df_sample = _stratified_sample(df, sample_size, "KAMUS USULAN", args.seed)
+                sampling_strata_col = "KAMUS USULAN"
                 print(
                     f"[INFO] Sampling mode: stratified_kamus | strata={df_sample['KAMUS USULAN'].nunique()} kategori | "
                     f"sample_size={len(df_sample)} | seed={args.seed}"
@@ -206,6 +261,10 @@ def main():
         else:
             df_sample = df.head(sample_size)
             print(f"[INFO] Sampling mode: head | sample_size={sample_size}")
+
+        sample_composition = _build_strata_composition(df_sample, sampling_strata_col)
+        if sample_composition:
+            print(f"[INFO] Komposisi strata ({sampling_strata_col}): {sample_composition}")
         
     except Exception as e:
         print(f"[ERROR] Dataset bermasalah: {e}")
@@ -263,6 +322,13 @@ def main():
             # ---------------------------------------------
             
             print(f"   -> Akurasi: {acc_score}/10 | Penalaran: {reason_score}/10 | Status: {status_teks}")
+
+            if sampling_strata_col and sampling_strata_col in row:
+                stratum_value = str(row[sampling_strata_col])
+                if stratum_value not in strata_eval_stats:
+                    strata_eval_stats[stratum_value] = {"total": 0, "passed": 0}
+                strata_eval_stats[stratum_value]["total"] += 1
+                strata_eval_stats[stratum_value]["passed"] += 1 if is_passed else 0
             
             if enable_mlflow:
                 with mlflow.start_run(run_name=f"Hakim_Row_{index}"):
@@ -289,14 +355,79 @@ def main():
     if berhasil > 0:
         avg_acc = round(total_accuracy / berhasil, 2)
         avg_res = round(total_reasoning / berhasil, 2)
+        fairness_rows, fairness_text = _build_fairness_summary(strata_eval_stats, sampling_strata_col)
+
+        if fairness_text:
+            print("\n" + fairness_text)
         
         if enable_mlflow:
             with mlflow.start_run(run_name="KESIMPULAN_RATA_RATA_EVALUASI"):
                 mlflow.log_param("judge_model", settings.OLLAMA_JUDGE_MODEL)
                 mlflow.log_param("dataset_size", len(df_sample))
+                mlflow.log_param("sampling_mode", args.sampling_mode)
+                mlflow.log_param("sampling_seed", args.seed)
+                mlflow.log_param("sampling_strata_col", sampling_strata_col or "NONE")
                 mlflow.log_metric("average_classifier_accuracy", avg_acc)
                 mlflow.log_metric("average_classifier_reasoning", avg_res)
                 mlflow.log_metric("total_batch_simulated_cost_usd", total_batch_cost)
+                mlflow.log_metric("sample_size_selected", len(df_sample))
+
+                if sample_composition:
+                    mlflow.log_metric("sample_strata_unique", len(sample_composition))
+                    used_metric_keys = set()
+                    col_key = _to_metric_safe_key(sampling_strata_col)
+                    for idx, (stratum_name, stratum_count) in enumerate(sample_composition.items()):
+                        stratum_key = _to_metric_safe_key(stratum_name)
+                        metric_key = f"sample_count_{col_key}_{stratum_key}"
+                        if metric_key in used_metric_keys:
+                            metric_key = f"{metric_key}_{idx}"
+                        used_metric_keys.add(metric_key)
+                        mlflow.log_metric(metric_key, stratum_count)
+
+                    composition_payload = {
+                        "sampling_mode": args.sampling_mode,
+                        "sampling_seed": args.seed,
+                        "sampling_strata_col": sampling_strata_col,
+                        "sample_size": len(df_sample),
+                        "strata_composition": sample_composition,
+                    }
+                    artifact_name = f"sampling/strata_composition_{_to_metric_safe_key(sampling_strata_col)}.json"
+                    mlflow.log_text(
+                        json.dumps(composition_payload, ensure_ascii=False, indent=2),
+                        artifact_name,
+                    )
+
+                if fairness_rows:
+                    col_key = _to_metric_safe_key(sampling_strata_col)
+                    for idx, row_stats in enumerate(fairness_rows):
+                        stratum_key = _to_metric_safe_key(row_stats["stratum"])
+                        base_key = f"fairness_{col_key}_{stratum_key}"
+                        if idx > 0:
+                            base_key = f"{base_key}_{idx}"
+
+                        mlflow.log_metric(f"{base_key}_pass_rate_pct", row_stats["pass_rate_pct"])
+                        mlflow.log_metric(f"{base_key}_passed", row_stats["passed"])
+                        mlflow.log_metric(f"{base_key}_failed", row_stats["failed"])
+                        mlflow.log_metric(f"{base_key}_total", row_stats["total"])
+
+                    fairness_payload = {
+                        "sampling_mode": args.sampling_mode,
+                        "sampling_seed": args.seed,
+                        "sampling_strata_col": sampling_strata_col,
+                        "thresholds": {
+                            "accuracy": val_threshold_accuracy,
+                            "reasoning": val_threshold_reasoning,
+                        },
+                        "fairness_rows": fairness_rows,
+                    }
+                    mlflow.log_text(
+                        json.dumps(fairness_payload, ensure_ascii=False, indent=2),
+                        f"sampling/fairness_summary_{_to_metric_safe_key(sampling_strata_col)}.json",
+                    )
+                    mlflow.log_text(
+                        fairness_text,
+                        f"sampling/fairness_dashboard_{_to_metric_safe_key(sampling_strata_col)}.md",
+                    )
         
         print("\n" + "="*53)
         print(f"🎉 [SUCCESS] EVALUASI SELESAI ({berhasil} Kasus)")
