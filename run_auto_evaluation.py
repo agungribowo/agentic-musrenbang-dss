@@ -17,6 +17,26 @@ from src.agents.classifier_agent import ClassifierAgent
 
 CSV_PATH = os.path.join(CURRENT_DIR, "data", "external", "Form Musrenbangkel 2026.csv")
 FAIRNESS_ALERT_THRESHOLD_PCT = 20.0
+STOCHASTIC_PROFILE_RANGES = {
+    "conservative": {
+        "acc_min": 4,
+        "acc_max": 8,
+        "reasoning_min": 3,
+        "reasoning_max": 7,
+    },
+    "balanced": {
+        "acc_min": 5,
+        "acc_max": 10,
+        "reasoning_min": 4,
+        "reasoning_max": 10,
+    },
+    "aggressive": {
+        "acc_min": 8,
+        "acc_max": 10,
+        "reasoning_min": 7,
+        "reasoning_max": 10,
+    },
+}
 
 
 def get_validation_thresholds():
@@ -215,27 +235,33 @@ def parse_args():
         help="Mode simulasi skor pada dry-run: static (tetap) atau stochastic (variatif).",
     )
     parser.add_argument(
+        "--stochastic-profile",
+        choices=["conservative", "balanced", "aggressive"],
+        default="balanced",
+        help="Preset rentang skor stochastic untuk demo cepat.",
+    )
+    parser.add_argument(
         "--stochastic-acc-min",
         type=int,
-        default=5,
+        default=None,
         help="Batas bawah skor accuracy untuk mode dry-run stochastic (1-10).",
     )
     parser.add_argument(
         "--stochastic-acc-max",
         type=int,
-        default=10,
+        default=None,
         help="Batas atas skor accuracy untuk mode dry-run stochastic (1-10).",
     )
     parser.add_argument(
         "--stochastic-reasoning-min",
         type=int,
-        default=4,
+        default=None,
         help="Batas bawah skor reasoning untuk mode dry-run stochastic (1-10).",
     )
     parser.add_argument(
         "--stochastic-reasoning-max",
         type=int,
-        default=10,
+        default=None,
         help="Batas atas skor reasoning untuk mode dry-run stochastic (1-10).",
     )
     parser.add_argument("--sample-size", type=int, default=15, help="Jumlah baris data yang dievaluasi.")
@@ -265,26 +291,56 @@ def main():
     strata_eval_stats = {}
     dry_run_rng = random.Random(args.seed)
 
+    profile_ranges = STOCHASTIC_PROFILE_RANGES[args.stochastic_profile]
+    effective_stochastic_acc_min = (
+        args.stochastic_acc_min
+        if args.stochastic_acc_min is not None
+        else profile_ranges["acc_min"]
+    )
+    effective_stochastic_acc_max = (
+        args.stochastic_acc_max
+        if args.stochastic_acc_max is not None
+        else profile_ranges["acc_max"]
+    )
+    effective_stochastic_reasoning_min = (
+        args.stochastic_reasoning_min
+        if args.stochastic_reasoning_min is not None
+        else profile_ranges["reasoning_min"]
+    )
+    effective_stochastic_reasoning_max = (
+        args.stochastic_reasoning_max
+        if args.stochastic_reasoning_max is not None
+        else profile_ranges["reasoning_max"]
+    )
+
     range_checks = [
-        ("stochastic-acc-min", args.stochastic_acc_min),
-        ("stochastic-acc-max", args.stochastic_acc_max),
-        ("stochastic-reasoning-min", args.stochastic_reasoning_min),
-        ("stochastic-reasoning-max", args.stochastic_reasoning_max),
+        ("stochastic-acc-min", effective_stochastic_acc_min),
+        ("stochastic-acc-max", effective_stochastic_acc_max),
+        ("stochastic-reasoning-min", effective_stochastic_reasoning_min),
+        ("stochastic-reasoning-max", effective_stochastic_reasoning_max),
     ]
     for name, value in range_checks:
         if value < 1 or value > 10:
             print(f"[ERROR] Nilai --{name} harus di rentang 1..10. Saat ini: {value}")
             return
 
-    if args.stochastic_acc_min > args.stochastic_acc_max:
+    if effective_stochastic_acc_min > effective_stochastic_acc_max:
         print("[ERROR] --stochastic-acc-min tidak boleh lebih besar dari --stochastic-acc-max.")
         return
 
-    if args.stochastic_reasoning_min > args.stochastic_reasoning_max:
+    if effective_stochastic_reasoning_min > effective_stochastic_reasoning_max:
         print("[ERROR] --stochastic-reasoning-min tidak boleh lebih besar dari --stochastic-reasoning-max.")
         return
     
     print("=====================================================")
+
+    if dry_run and args.dry_run_mode == "stochastic":
+        print(
+            "[INFO] Dry-run stochastic profile: "
+            f"{args.stochastic_profile} | "
+            f"acc={effective_stochastic_acc_min}-{effective_stochastic_acc_max} | "
+            f"reasoning={effective_stochastic_reasoning_min}-{effective_stochastic_reasoning_max}"
+        )
     print("🚀 [INFO] MEMULAI PIPELINE EVALUASI OTOMATIS (MASSAL)")
     print("=====================================================")
     
@@ -387,10 +443,10 @@ def main():
             if args.dry_run_mode == "stochastic":
                 metrics = build_dry_run_metrics_stochastic(
                     dry_run_rng,
-                    args.stochastic_acc_min,
-                    args.stochastic_acc_max,
-                    args.stochastic_reasoning_min,
-                    args.stochastic_reasoning_max,
+                    effective_stochastic_acc_min,
+                    effective_stochastic_acc_max,
+                    effective_stochastic_reasoning_min,
+                    effective_stochastic_reasoning_max,
                 )
             else:
                 metrics = build_dry_run_metrics_static()
@@ -461,10 +517,11 @@ def main():
                 mlflow.log_param("sampling_seed", args.seed)
                 mlflow.log_param("sampling_strata_col", sampling_strata_col or "NONE")
                 mlflow.log_param("dry_run_mode", args.dry_run_mode if dry_run else "none")
-                mlflow.log_param("stochastic_acc_min", args.stochastic_acc_min)
-                mlflow.log_param("stochastic_acc_max", args.stochastic_acc_max)
-                mlflow.log_param("stochastic_reasoning_min", args.stochastic_reasoning_min)
-                mlflow.log_param("stochastic_reasoning_max", args.stochastic_reasoning_max)
+                mlflow.log_param("stochastic_profile", args.stochastic_profile)
+                mlflow.log_param("stochastic_acc_min", effective_stochastic_acc_min)
+                mlflow.log_param("stochastic_acc_max", effective_stochastic_acc_max)
+                mlflow.log_param("stochastic_reasoning_min", effective_stochastic_reasoning_min)
+                mlflow.log_param("stochastic_reasoning_max", effective_stochastic_reasoning_max)
                 mlflow.log_metric("average_classifier_accuracy", avg_acc)
                 mlflow.log_metric("average_classifier_reasoning", avg_res)
                 mlflow.log_metric("total_batch_simulated_cost_usd", total_batch_cost)

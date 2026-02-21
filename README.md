@@ -172,10 +172,15 @@ Pastikan variabel berikut tersedia:
 - `--dry-run-mode`:
 	- `static`: skor simulasi tetap (`accuracy=10`, `reasoning=9`).
 	- `stochastic`: skor simulasi variatif namun reproducible mengikuti `--seed`.
+- `--stochastic-profile` (shortcut preset rentang stochastic):
+	- `conservative` → akurasi `4-8`, reasoning `3-7`
+	- `balanced` → akurasi `5-10`, reasoning `4-10` (default)
+	- `aggressive` → akurasi `8-10`, reasoning `7-10`
 - Rentang skor saat `--dry-run-mode stochastic`:
 	- `--stochastic-acc-min` / `--stochastic-acc-max`
 	- `--stochastic-reasoning-min` / `--stochastic-reasoning-max`
 	- Semua nilai harus di rentang `1..10`.
+	- Jika Anda isi nilai manual, nilai tersebut akan override preset profile.
 - `--sampling-mode`:
 	- `head`: ambil baris teratas (baseline cepat, paling berisiko bias urutan data).
 	- `random`: acak dari seluruh data.
@@ -193,6 +198,12 @@ Contoh skenario konservatif (cenderung skor rendah):
 
 ```powershell
 python .\run_auto_evaluation.py --dry-run --dry-run-mode stochastic --stochastic-acc-min 4 --stochastic-acc-max 8 --stochastic-reasoning-min 3 --stochastic-reasoning-max 7 --sampling-mode stratified_kamus --sample-size 20 --seed 42 --no-mlflow
+```
+
+Contoh command ringkas berbasis preset profile:
+
+```powershell
+python .\run_auto_evaluation.py --dry-run --dry-run-mode stochastic --stochastic-profile aggressive --sampling-mode stratified_kamus --sample-size 20 --seed 42 --no-mlflow
 ```
 
 Contoh skenario agresif (cenderung skor tinggi):
