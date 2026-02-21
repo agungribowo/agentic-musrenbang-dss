@@ -5,15 +5,19 @@ import json
 import argparse
 import requests
 import pandas as pd
-import mlflow
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(CURRENT_DIR)
 
 import src.config.settings as settings
+
 from src.agents.classifier_agent import ClassifierAgent
 
 CSV_PATH = os.path.join(CURRENT_DIR, "data", "external", "Form Musrenbangkel 2026.csv")
+
+
+def get_validation_thresholds():
+    return settings.VALIDATION_THRESHOLD_ACCURACY, settings.VALIDATION_THRESHOLD_REASONING
 
 def evaluate_classifier_with_llama(user_query, agent_response, ground_truth_kamus):
     prompt = f"""
@@ -39,7 +43,11 @@ def evaluate_classifier_with_llama(user_query, agent_response, ground_truth_kamu
     }
 
     try:
-        response = requests.post(settings.OLLAMA_API_URL, json=payload, timeout=120)
+        response = requests.post(
+            settings.OLLAMA_API_URL,
+            json=payload,
+            timeout=120,
+        )
         response.raise_for_status()
         result_text = response.json().get("response", "{}")
         return json.loads(result_text)
@@ -65,10 +73,73 @@ def normalize_classifier_result(classifier_result):
 
     return str(classifier_result), 0.0
 
+
+def _stratified_sample(df, sample_size, strata_col, seed):
+    working_df = df.dropna(subset=[strata_col]).copy()
+    if working_df.empty:
+        return df.sample(n=sample_size, random_state=seed)
+
+    strata_counts = working_df[strata_col].value_counts().sort_index()
+    strata_weights = strata_counts / strata_counts.sum()
+    allocations = (strata_weights * sample_size).round().astype(int)
+    allocations[allocations < 1] = 1
+
+    while allocations.sum() > sample_size:
+        reducible = allocations[allocations > 1]
+        if reducible.empty:
+            break
+        key_to_reduce = reducible.sort_values(ascending=False).index[0]
+        allocations.loc[key_to_reduce] -= 1
+
+    while allocations.sum() < sample_size:
+        remaining_capacity = strata_counts - allocations
+        expandable = remaining_capacity[remaining_capacity > 0]
+        if expandable.empty:
+            break
+        key_to_increase = expandable.sort_values(ascending=False).index[0]
+        allocations.loc[key_to_increase] += 1
+
+    sampled_parts = []
+    for idx, (stratum, take_n) in enumerate(allocations.items()):
+        if take_n <= 0:
+            continue
+        stratum_df = working_df[working_df[strata_col] == stratum]
+        take_n = min(take_n, len(stratum_df))
+        sampled_parts.append(stratum_df.sample(n=take_n, random_state=seed + idx))
+
+    if not sampled_parts:
+        return df.sample(n=sample_size, random_state=seed)
+
+    sampled_df = pd.concat(sampled_parts).drop_duplicates()
+
+    if len(sampled_df) < sample_size:
+        remaining_df = df.drop(index=sampled_df.index, errors="ignore")
+        remaining_need = min(sample_size - len(sampled_df), len(remaining_df))
+        if remaining_need > 0:
+            filler_df = remaining_df.sample(n=remaining_need, random_state=seed)
+            sampled_df = pd.concat([sampled_df, filler_df])
+
+    if len(sampled_df) > sample_size:
+        sampled_df = sampled_df.sample(n=sample_size, random_state=seed)
+
+    return sampled_df
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Pipeline evaluasi otomatis klasifikasi Musrenbang")
     parser.add_argument("--dry-run", action="store_true", help="Jalankan pipeline tanpa memanggil API.")
     parser.add_argument("--sample-size", type=int, default=15, help="Jumlah baris data yang dievaluasi.")
+    parser.add_argument(
+        "--sampling-mode",
+        choices=["random", "head", "stratified_rw", "stratified_kamus"],
+        default="random",
+        help="Mode sampling: random, head, stratified_rw, atau stratified_kamus.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Seed untuk sampling random agar hasil reproducible.",
+    )
     parser.add_argument("--no-mlflow", action="store_true", help="Matikan tracking MLflow.")
     return parser.parse_args()
 
@@ -76,6 +147,8 @@ def main():
     args = parse_args()
     dry_run = args.dry_run
     enable_mlflow = not args.no_mlflow
+    mlflow = None
+    val_threshold_accuracy, val_threshold_reasoning = get_validation_thresholds()
     
     print("=====================================================")
     print("🚀 [INFO] MEMULAI PIPELINE EVALUASI OTOMATIS (MASSAL)")
@@ -83,6 +156,11 @@ def main():
     
     if enable_mlflow:
         settings.setup_mlflow_tracking()
+        mlflow = settings.mlflow
+        if mlflow is None:
+            print(f"[WARN] MLflow tidak bisa diimport, mode no-mlflow diaktifkan otomatis: {settings.MLFLOW_IMPORT_ERROR}")
+            enable_mlflow = False
+
     agen_klasifikasi = None if dry_run else ClassifierAgent(enable_mlflow=enable_mlflow)
     
     try:
@@ -98,7 +176,36 @@ def main():
         df = df.dropna(subset=[kolom_masalah, 'KAMUS USULAN'])
         
         sample_size = max(args.sample_size, 1)
-        df_sample = df.head(sample_size)
+        sample_size = min(sample_size, len(df))
+
+        if args.sampling_mode == "random":
+            df_sample = df.sample(n=sample_size, random_state=args.seed)
+            print(f"[INFO] Sampling mode: random | sample_size={sample_size} | seed={args.seed}")
+        elif args.sampling_mode == "stratified_rw":
+            if "RW" not in df.columns:
+                print("[WARN] Kolom RW tidak ditemukan. Fallback ke random sampling.")
+                df_sample = df.sample(n=sample_size, random_state=args.seed)
+                print(f"[INFO] Sampling mode: random(fallback) | sample_size={sample_size} | seed={args.seed}")
+            else:
+                df_sample = _stratified_sample(df, sample_size, "RW", args.seed)
+                print(
+                    f"[INFO] Sampling mode: stratified_rw | strata={df_sample['RW'].nunique()} RW | "
+                    f"sample_size={len(df_sample)} | seed={args.seed}"
+                )
+        elif args.sampling_mode == "stratified_kamus":
+            if "KAMUS USULAN" not in df.columns:
+                print("[WARN] Kolom KAMUS USULAN tidak ditemukan. Fallback ke random sampling.")
+                df_sample = df.sample(n=sample_size, random_state=args.seed)
+                print(f"[INFO] Sampling mode: random(fallback) | sample_size={sample_size} | seed={args.seed}")
+            else:
+                df_sample = _stratified_sample(df, sample_size, "KAMUS USULAN", args.seed)
+                print(
+                    f"[INFO] Sampling mode: stratified_kamus | strata={df_sample['KAMUS USULAN'].nunique()} kategori | "
+                    f"sample_size={len(df_sample)} | seed={args.seed}"
+                )
+        else:
+            df_sample = df.head(sample_size)
+            print(f"[INFO] Sampling mode: head | sample_size={sample_size}")
         
     except Exception as e:
         print(f"[ERROR] Dataset bermasalah: {e}")
@@ -149,13 +256,13 @@ def main():
             # --- TAMBAHAN LOGIKA SOFT THRESHOLD PoC v1 ---
             # Mengevaluasi apakah skor memenuhi standar minimal dari settings.py
             is_passed = (
-                acc_score >= settings.VALIDATION_THRESHOLD_ACCURACY and
-                reason_score >= settings.VALIDATION_THRESHOLD_REASONING
+                acc_score >= val_threshold_accuracy and
+                reason_score >= val_threshold_reasoning
             )
             status_teks = "LULUS" if is_passed else "GAGAL VALIDASI"
             # ---------------------------------------------
             
-            print(f"   -> Akurasi: {acc_score}/10 | Penalaran: {reason_score}/10")
+            print(f"   -> Akurasi: {acc_score}/10 | Penalaran: {reason_score}/10 | Status: {status_teks}")
             
             if enable_mlflow:
                 with mlflow.start_run(run_name=f"Hakim_Row_{index}"):
@@ -167,8 +274,8 @@ def main():
                     mlflow.log_metric("validation_pass", 1 if is_passed else 0)
                     
                     # Log parameter kebijakan yang digunakan (Audit Trail)
-                    mlflow.log_param("val_threshold_accuracy", settings.VALIDATION_THRESHOLD_ACCURACY)
-                    mlflow.log_param("val_threshold_reasoning", settings.VALIDATION_THRESHOLD_REASONING)
+                    mlflow.log_param("val_threshold_accuracy", val_threshold_accuracy)
+                    mlflow.log_param("val_threshold_reasoning", val_threshold_reasoning)
                     mlflow.set_tag("validation_policy_version", "v1.0-soft")
             
             total_accuracy += acc_score

@@ -1,8 +1,17 @@
 import os
 from dotenv import load_dotenv
-import dagshub
-import mlflow
-from groq import Groq
+
+dagshub = None
+mlflow = None
+DAGSHUB_IMPORT_ERROR = None
+MLFLOW_IMPORT_ERROR = None
+
+try:
+    from groq import Groq
+    GROQ_IMPORT_ERROR = None
+except Exception as exc:
+    Groq = None
+    GROQ_IMPORT_ERROR = exc
 
 # Muat variabel dari file .env saat modul pertama kali diimpor
 load_dotenv()
@@ -26,6 +35,24 @@ DAGSHUB_TOKEN = os.getenv("DAGSHUB_USER_TOKEN")
 DEFAULT_LLM_MODEL = "llama-3.3-70b-versatile"
 _TRACKING_SETUP_DONE = False
 
+
+def _lazy_import_tracking_libs():
+    global dagshub, mlflow, DAGSHUB_IMPORT_ERROR, MLFLOW_IMPORT_ERROR
+
+    if dagshub is None and DAGSHUB_IMPORT_ERROR is None:
+        try:
+            import dagshub as dagshub_module
+            dagshub = dagshub_module
+        except BaseException as exc:
+            DAGSHUB_IMPORT_ERROR = exc
+
+    if mlflow is None and MLFLOW_IMPORT_ERROR is None:
+        try:
+            import mlflow as mlflow_module
+            mlflow = mlflow_module
+        except BaseException as exc:
+            MLFLOW_IMPORT_ERROR = exc
+
 # ==========================================
 # SIMULATED COST TRACKING (CLAWWORK LOGIC)
 # ==========================================
@@ -47,7 +74,9 @@ print("[System] Memuat konfigurasi utama (Groq Engine)...")
 
 # 1. Inisialisasi Groq API
 groq_client = None
-if GROQ_API_KEY:
+if Groq is None:
+    print(f"[!] WARNING: package groq tidak tersedia: {GROQ_IMPORT_ERROR}")
+elif GROQ_API_KEY:
     try:
         groq_client = Groq(api_key=GROQ_API_KEY)
         print("[-] Koneksi ke Groq API: BERHASIL")
@@ -64,6 +93,18 @@ def setup_mlflow_tracking():
     """
     global _TRACKING_SETUP_DONE
     if _TRACKING_SETUP_DONE:
+        return
+
+    _lazy_import_tracking_libs()
+
+    if mlflow is None:
+        print(f"[!] Peringatan: package mlflow tidak tersedia. Tracking dimatikan. Detail: {MLFLOW_IMPORT_ERROR}")
+        _TRACKING_SETUP_DONE = True
+        return
+
+    if dagshub is None:
+        print(f"[!] Peringatan: package dagshub tidak tersedia. Tracking berjalan lokal. Detail: {DAGSHUB_IMPORT_ERROR}")
+        _TRACKING_SETUP_DONE = True
         return
 
     if DAGSHUB_OWNER and DAGSHUB_REPO:
