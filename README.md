@@ -236,7 +236,7 @@ Saat evaluasi berjalan dengan MLflow aktif, sistem akan menulis ringkasan fairne
 	- `sampling/fairness_dashboard_<strata_col>.md`
 
 ### Validation Threshold (Quality Gate)
-	Sistem menggunakan pendekatan *Soft Threshold* pada fase PoC ini untuk menentukan status "Lulus" atau "Gagal" dari setiap usulan warga berdasarkan skor dari `OLLAMA_JUDGE_MODEL`. Konstanta ini didefinisikan secara terpusat di `src/config/settings.py`:
+Sistem menggunakan pendekatan *Soft Threshold* pada fase PoC ini untuk menentukan status "Lulus" atau "Gagal" dari setiap usulan warga berdasarkan skor dari `OLLAMA_JUDGE_MODEL`. Konstanta ini didefinisikan secara terpusat di `src/config/settings.py`:
 
 - `VALIDATION_THRESHOLD_ACCURACY` (Default: 8.0)
 - `VALIDATION_THRESHOLD_REASONING` (Default: 7.0)

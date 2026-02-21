@@ -51,20 +51,6 @@ Gunakan format berikut untuk setiap sesi baru:
   - Result: Sukses; skor variatif, fairness dashboard aktif, fairness alert terpicu pada skenario konservatif.
 - Notes: Entry ini adalah baseline untuk changelog append harian otomatis.
 
-### Session Template (Copy & Append)
-
-### Session <timestamp-iso8601>
-- Ringkasan:
-- Scope:
-- File Changed:
-  -
-- Detail:
-  -
-- Verification:
-  - Command:
-  - Result:
-- Notes:
-
 ### Session 2026-02-21T09:19:28.9248207+07:00
 - Ringkasan: Template append test
 - Scope: Changelog tooling
