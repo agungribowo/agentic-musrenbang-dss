@@ -235,6 +235,16 @@ Saat evaluasi berjalan dengan MLflow aktif, sistem akan menulis ringkasan fairne
 	- `sampling/fairness_summary_<strata_col>.json`
 	- `sampling/fairness_dashboard_<strata_col>.md`
 
+### Validation Threshold (Quality Gate)
+	Sistem menggunakan pendekatan *Soft Threshold* pada fase PoC ini untuk menentukan status "Lulus" atau "Gagal" dari setiap usulan warga berdasarkan skor dari `OLLAMA_JUDGE_MODEL`. Konstanta ini didefinisikan secara terpusat di `src/config/settings.py`:
+
+- `VALIDATION_THRESHOLD_ACCURACY` (Default: 8.0)
+- `VALIDATION_THRESHOLD_REASONING` (Default: 7.0)
+- `VALIDATION_THRESHOLD_RELEVANCE` (Default: 7.0)
+
+	Jika skor dari agen berada di bawah ambang batas ini, usulan tersebut akan dicatat sebagai `validation_pass = 0` (Gagal) di dalam MLflow, yang kemudian digunakan untuk menghitung persentase *Fairness Pass Rate*.
+
+
 ### Demo Checklist (Pre-flight Check)
 
 Sebelum live demo, pastikan 5 poin ini aman:
