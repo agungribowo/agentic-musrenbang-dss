@@ -4,6 +4,7 @@ import time
 import json
 import re
 import argparse
+import random
 import requests
 import pandas as pd
 
@@ -15,6 +16,7 @@ import src.config.settings as settings
 from src.agents.classifier_agent import ClassifierAgent
 
 CSV_PATH = os.path.join(CURRENT_DIR, "data", "external", "Form Musrenbangkel 2026.csv")
+FAIRNESS_ALERT_THRESHOLD_PCT = 20.0
 
 
 def get_validation_thresholds():
@@ -63,8 +65,24 @@ def build_dry_run_response(ground_truth_kamus):
         "ALASAN PENALARAN: Output simulasi untuk pengujian pipeline tanpa API eksternal."
     ), 0.0
 
-def build_dry_run_metrics():
+def build_dry_run_metrics_static():
     return {"accuracy_score": 10, "reasoning_score": 9, "feedback": "Simulasi dry-run statis."}
+
+
+def build_dry_run_metrics_stochastic(
+    rng,
+    acc_min,
+    acc_max,
+    reasoning_min,
+    reasoning_max,
+):
+    accuracy_score = rng.randint(acc_min, acc_max)
+    reasoning_score = rng.randint(reasoning_min, reasoning_max)
+    return {
+        "accuracy_score": accuracy_score,
+        "reasoning_score": reasoning_score,
+        "feedback": "Simulasi dry-run stokastik (reproducible berdasarkan seed).",
+    }
 
 def normalize_classifier_result(classifier_result):
     if isinstance(classifier_result, tuple):
@@ -163,7 +181,13 @@ def _build_fairness_summary(strata_eval_stats, strata_col):
         )
 
     if not fairness_rows:
-        return None, None
+        return None, None, None, None
+
+    pass_rates = [row["pass_rate_pct"] for row in fairness_rows]
+    fairness_gap_pct = round(max(pass_rates) - min(pass_rates), 2) if pass_rates else None
+    fairness_alert = (
+        fairness_gap_pct is not None and fairness_gap_pct > FAIRNESS_ALERT_THRESHOLD_PCT
+    )
 
     lines = [f"[FAIRNESS] Dashboard per strata ({strata_col}):"]
     for row in fairness_rows:
@@ -172,11 +196,48 @@ def _build_fairness_summary(strata_eval_stats, strata_col):
             f"gagal={row['failed']} | pass_rate={row['pass_rate_pct']}%"
         )
 
-    return fairness_rows, "\n".join(lines)
+    if fairness_gap_pct is not None:
+        lines.append(f"[FAIRNESS] gap_pass_rate_pct={fairness_gap_pct}%")
+        lines.append(
+            f"[FAIRNESS] alert_threshold_pct={FAIRNESS_ALERT_THRESHOLD_PCT}% | "
+            f"fairness_alert={str(fairness_alert).lower()}"
+        )
+
+    return fairness_rows, "\n".join(lines), fairness_gap_pct, fairness_alert
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Pipeline evaluasi otomatis klasifikasi Musrenbang")
     parser.add_argument("--dry-run", action="store_true", help="Jalankan pipeline tanpa memanggil API.")
+    parser.add_argument(
+        "--dry-run-mode",
+        choices=["static", "stochastic"],
+        default="static",
+        help="Mode simulasi skor pada dry-run: static (tetap) atau stochastic (variatif).",
+    )
+    parser.add_argument(
+        "--stochastic-acc-min",
+        type=int,
+        default=5,
+        help="Batas bawah skor accuracy untuk mode dry-run stochastic (1-10).",
+    )
+    parser.add_argument(
+        "--stochastic-acc-max",
+        type=int,
+        default=10,
+        help="Batas atas skor accuracy untuk mode dry-run stochastic (1-10).",
+    )
+    parser.add_argument(
+        "--stochastic-reasoning-min",
+        type=int,
+        default=4,
+        help="Batas bawah skor reasoning untuk mode dry-run stochastic (1-10).",
+    )
+    parser.add_argument(
+        "--stochastic-reasoning-max",
+        type=int,
+        default=10,
+        help="Batas atas skor reasoning untuk mode dry-run stochastic (1-10).",
+    )
     parser.add_argument("--sample-size", type=int, default=15, help="Jumlah baris data yang dievaluasi.")
     parser.add_argument(
         "--sampling-mode",
@@ -202,6 +263,26 @@ def main():
     sampling_strata_col = None
     sample_composition = None
     strata_eval_stats = {}
+    dry_run_rng = random.Random(args.seed)
+
+    range_checks = [
+        ("stochastic-acc-min", args.stochastic_acc_min),
+        ("stochastic-acc-max", args.stochastic_acc_max),
+        ("stochastic-reasoning-min", args.stochastic_reasoning_min),
+        ("stochastic-reasoning-max", args.stochastic_reasoning_max),
+    ]
+    for name, value in range_checks:
+        if value < 1 or value > 10:
+            print(f"[ERROR] Nilai --{name} harus di rentang 1..10. Saat ini: {value}")
+            return
+
+    if args.stochastic_acc_min > args.stochastic_acc_max:
+        print("[ERROR] --stochastic-acc-min tidak boleh lebih besar dari --stochastic-acc-max.")
+        return
+
+    if args.stochastic_reasoning_min > args.stochastic_reasoning_max:
+        print("[ERROR] --stochastic-reasoning-min tidak boleh lebih besar dari --stochastic-reasoning-max.")
+        return
     
     print("=====================================================")
     print("🚀 [INFO] MEMULAI PIPELINE EVALUASI OTOMATIS (MASSAL)")
@@ -303,7 +384,16 @@ def main():
 
         # --- STEP B: Agen Hakim Menilai (Ollama Lokal) ---
         if dry_run:
-            metrics = build_dry_run_metrics()
+            if args.dry_run_mode == "stochastic":
+                metrics = build_dry_run_metrics_stochastic(
+                    dry_run_rng,
+                    args.stochastic_acc_min,
+                    args.stochastic_acc_max,
+                    args.stochastic_reasoning_min,
+                    args.stochastic_reasoning_max,
+                )
+            else:
+                metrics = build_dry_run_metrics_static()
         else:
             print("   -> [HAKIM] Memanggil Ollama Local untuk mengevaluasi...")
             metrics = evaluate_classifier_with_llama(kasus_lengkap, hasil_agen, ground_truth)
@@ -355,7 +445,10 @@ def main():
     if berhasil > 0:
         avg_acc = round(total_accuracy / berhasil, 2)
         avg_res = round(total_reasoning / berhasil, 2)
-        fairness_rows, fairness_text = _build_fairness_summary(strata_eval_stats, sampling_strata_col)
+        fairness_rows, fairness_text, fairness_gap_pct, fairness_alert = _build_fairness_summary(
+            strata_eval_stats,
+            sampling_strata_col,
+        )
 
         if fairness_text:
             print("\n" + fairness_text)
@@ -367,10 +460,16 @@ def main():
                 mlflow.log_param("sampling_mode", args.sampling_mode)
                 mlflow.log_param("sampling_seed", args.seed)
                 mlflow.log_param("sampling_strata_col", sampling_strata_col or "NONE")
+                mlflow.log_param("dry_run_mode", args.dry_run_mode if dry_run else "none")
+                mlflow.log_param("stochastic_acc_min", args.stochastic_acc_min)
+                mlflow.log_param("stochastic_acc_max", args.stochastic_acc_max)
+                mlflow.log_param("stochastic_reasoning_min", args.stochastic_reasoning_min)
+                mlflow.log_param("stochastic_reasoning_max", args.stochastic_reasoning_max)
                 mlflow.log_metric("average_classifier_accuracy", avg_acc)
                 mlflow.log_metric("average_classifier_reasoning", avg_res)
                 mlflow.log_metric("total_batch_simulated_cost_usd", total_batch_cost)
                 mlflow.log_metric("sample_size_selected", len(df_sample))
+                mlflow.log_param("fairness_alert_threshold_pct", FAIRNESS_ALERT_THRESHOLD_PCT)
 
                 if sample_composition:
                     mlflow.log_metric("sample_strata_unique", len(sample_composition))
@@ -410,6 +509,11 @@ def main():
                         mlflow.log_metric(f"{base_key}_failed", row_stats["failed"])
                         mlflow.log_metric(f"{base_key}_total", row_stats["total"])
 
+                    if fairness_gap_pct is not None:
+                        mlflow.log_metric("fairness_gap_pass_rate_pct", fairness_gap_pct)
+                        mlflow.log_metric("fairness_alert", 1 if fairness_alert else 0)
+                        mlflow.set_tag("fairness_alert", str(fairness_alert).lower())
+
                     fairness_payload = {
                         "sampling_mode": args.sampling_mode,
                         "sampling_seed": args.seed,
@@ -419,6 +523,9 @@ def main():
                             "reasoning": val_threshold_reasoning,
                         },
                         "fairness_rows": fairness_rows,
+                        "fairness_gap_pass_rate_pct": fairness_gap_pct,
+                        "fairness_alert_threshold_pct": FAIRNESS_ALERT_THRESHOLD_PCT,
+                        "fairness_alert": fairness_alert,
                     }
                     mlflow.log_text(
                         json.dumps(fairness_payload, ensure_ascii=False, indent=2),

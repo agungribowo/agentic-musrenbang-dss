@@ -80,7 +80,7 @@ elif GROQ_API_KEY:
     try:
         groq_client = Groq(api_key=GROQ_API_KEY)
         print("[-] Koneksi ke Groq API: BERHASIL")
-    except Exception as e:
+    except BaseException as e:
         print(f"[!] Gagal inisialisasi Groq API: {e}")
 else:
     print("[!] ERROR: GROQ_API_KEY tidak ditemukan di .env!")

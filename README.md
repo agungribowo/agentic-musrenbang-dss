@@ -169,12 +169,37 @@ Pastikan variabel berikut tersedia:
 
 ### Opsi Sampling Evaluasi
 
+- `--dry-run-mode`:
+	- `static`: skor simulasi tetap (`accuracy=10`, `reasoning=9`).
+	- `stochastic`: skor simulasi variatif namun reproducible mengikuti `--seed`.
+- Rentang skor saat `--dry-run-mode stochastic`:
+	- `--stochastic-acc-min` / `--stochastic-acc-max`
+	- `--stochastic-reasoning-min` / `--stochastic-reasoning-max`
+	- Semua nilai harus di rentang `1..10`.
 - `--sampling-mode`:
 	- `head`: ambil baris teratas (baseline cepat, paling berisiko bias urutan data).
 	- `random`: acak dari seluruh data.
 	- `stratified_rw`: acak berstrata berdasarkan kolom `RW`.
 	- `stratified_kamus`: acak berstrata berdasarkan kolom `KAMUS USULAN`.
 - `--seed`: seed random untuk reproduksibilitas hasil sampling.
+
+Contoh uji fairness realistis tanpa API eksternal:
+
+```powershell
+python .\run_auto_evaluation.py --dry-run --dry-run-mode stochastic --sampling-mode stratified_kamus --sample-size 20 --seed 42 --no-mlflow
+```
+
+Contoh skenario konservatif (cenderung skor rendah):
+
+```powershell
+python .\run_auto_evaluation.py --dry-run --dry-run-mode stochastic --stochastic-acc-min 4 --stochastic-acc-max 8 --stochastic-reasoning-min 3 --stochastic-reasoning-max 7 --sampling-mode stratified_kamus --sample-size 20 --seed 42 --no-mlflow
+```
+
+Contoh skenario agresif (cenderung skor tinggi):
+
+```powershell
+python .\run_auto_evaluation.py --dry-run --dry-run-mode stochastic --stochastic-acc-min 8 --stochastic-acc-max 10 --stochastic-reasoning-min 7 --stochastic-reasoning-max 10 --sampling-mode stratified_kamus --sample-size 20 --seed 42 --no-mlflow
+```
 
 ### Audit Fairness di MLflow
 
@@ -189,6 +214,11 @@ Saat evaluasi berjalan dengan MLflow aktif, sistem akan menulis ringkasan fairne
 	- `fairness_<strata_col>_<stratum>_passed`
 	- `fairness_<strata_col>_<stratum>_failed`
 	- `fairness_<strata_col>_<stratum>_total`
+	- `fairness_gap_pass_rate_pct`
+	- `fairness_alert` (0/1)
+- **Threshold fairness alert**:
+	- `fairness_alert_threshold_pct` (default: `20.0`)
+	- Rule: `fairness_alert=true` jika `fairness_gap_pass_rate_pct > fairness_alert_threshold_pct`.
 - **Artifact**:
 	- `sampling/strata_composition_<strata_col>.json`
 	- `sampling/fairness_summary_<strata_col>.json`
