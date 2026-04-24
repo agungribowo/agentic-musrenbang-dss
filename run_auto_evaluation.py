@@ -182,7 +182,7 @@ def _build_strata_composition(df_sample, strata_col):
 
 def _build_fairness_summary(strata_eval_stats, strata_col):
     if not strata_col or not strata_eval_stats:
-        return None, None
+        return None, None, None, None
 
     fairness_rows = []
     for stratum_name, stats in sorted(strata_eval_stats.items(), key=lambda item: item[0]):
@@ -439,6 +439,22 @@ def main():
             continue 
 
         # --- STEP B: Agen Hakim Menilai (Ollama Lokal) ---
+        # Bangun prompt untuk judge sebelum eksekusi
+        judge_prompt = f"""
+        Anda adalah Auditor Ahli Perencanaan Pembangunan (LLM-as-a-Judge) tingkat Kecamatan.
+        Tugas Anda mengevaluasi akurasi Agen Klasifikasi dalam memetakan usulan warga ke Nomenklatur Musrenbang.
+        
+        Usulan Warga: "{kasus_lengkap}"
+        Nomenklatur Pilihan Agen (Groq): "{hasil_agen}"
+        Nomenklatur Seharusnya (Ground Truth dari CSV): "{ground_truth}"
+        
+        Berikan penilaian metrik (skala 1-10) untuk:
+        1. accuracy_score: Seberapa cocok Nomenklatur pilihan Agen dengan Ground Truth
+        2. reasoning_score: Kualitas alasan logis yang diberikan Agen.
+        
+        OUTPUT HARUS berformat JSON dengan key: "accuracy_score", "reasoning_score", dan "feedback".
+        """
+        
         if dry_run:
             if args.dry_run_mode == "stochastic":
                 metrics = build_dry_run_metrics_stochastic(
@@ -489,6 +505,14 @@ def main():
                     mlflow.log_param("val_threshold_accuracy", val_threshold_accuracy)
                     mlflow.log_param("val_threshold_reasoning", val_threshold_reasoning)
                     mlflow.set_tag("validation_policy_version", "v1.0-soft")
+                    
+                    # Log Prompt dan Data untuk Audit Trail
+                    mlflow.log_text(kasus_lengkap, "1_input_warga.txt")
+                    mlflow.log_text(ground_truth, "2_ground_truth.txt")
+                    mlflow.log_text(hasil_agen, "3_output_agent.txt")
+                    mlflow.log_text(judge_prompt, "4_prompt_judge.txt")
+                    if metrics:
+                        mlflow.log_text(json.dumps(metrics, ensure_ascii=False, indent=2), "5_output_judge.json")
             
             total_accuracy += acc_score
             total_reasoning += reason_score
