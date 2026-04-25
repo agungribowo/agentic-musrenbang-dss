@@ -83,7 +83,7 @@ def build_dry_run_response(ground_truth_kamus):
         f"NOMENKLATUR TERPILIH: {ground_truth_kamus}\n"
         "DINAS TERKAIT: (SIMULASI DRY-RUN)\n"
         "ALASAN PENALARAN: Output simulasi untuk pengujian pipeline tanpa API eksternal."
-    ), 0.0
+    ), 0.0, None
 
 def build_dry_run_metrics_static():
     return {"accuracy_score": 10, "reasoning_score": 9, "feedback": "Simulasi dry-run statis."}
@@ -108,9 +108,10 @@ def normalize_classifier_result(classifier_result):
     if isinstance(classifier_result, tuple):
         hasil_text = str(classifier_result[0]) if len(classifier_result) > 0 else ""
         cost_usd = float(classifier_result[1]) if len(classifier_result) > 1 else 0.0
-        return hasil_text, cost_usd
-
-    return str(classifier_result), 0.0
+        token_info = classifier_result[2] if len(classifier_result) > 2 else None
+        return hasil_text, cost_usd, token_info
+    
+    return str(classifier_result), 0.0, None
 
 
 def _stratified_sample(df, sample_size, strata_col, seed):
@@ -351,7 +352,7 @@ def main():
             print(f"[WARN] MLflow tidak bisa diimport, mode no-mlflow diaktifkan otomatis: {settings.MLFLOW_IMPORT_ERROR}")
             enable_mlflow = False
 
-    agen_klasifikasi = None if dry_run else ClassifierAgent(enable_mlflow=enable_mlflow)
+    agen_klasifikasi = None if dry_run else ClassifierAgent(enable_mlflow=False)
     
     try:
         try:
@@ -426,12 +427,18 @@ def main():
         # --- STEP A: Agen Utama Bekerja (Groq) ---
         try:
             if dry_run:
-                hasil_agen, cost_usd = build_dry_run_response(ground_truth)
+                hasil_agen, cost_usd, token_info = build_dry_run_response(ground_truth)
             else:
                 classifier_result = agen_klasifikasi.analyze(kasus_lengkap, run_name=f"Eval_Row_{index}")
-                hasil_agen, cost_usd = normalize_classifier_result(classifier_result)
+                hasil_agen, cost_usd, token_info = normalize_classifier_result(classifier_result)
             
             total_batch_cost += cost_usd
+            
+            # Log token info to MLFlow if available
+            if not dry_run and enable_mlflow and token_info:
+                mlflow.log_metric("prompt_tokens", token_info.get("prompt_tokens", 0))
+                mlflow.log_metric("completion_tokens", token_info.get("completion_tokens", 0))
+                mlflow.log_metric("simulated_cost_usd", token_info.get("total_cost_usd", 0.0))
                 
         except Exception as e:
             print(f"[!] Groq API Error: {e}")

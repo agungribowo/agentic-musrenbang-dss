@@ -93,6 +93,13 @@ class ClassifierAgent:
                 cost_input = (prompt_tokens / 1_000_000) * settings.COST_PER_1M_INPUT_TOKENS
                 cost_output = (completion_tokens / 1_000_000) * settings.COST_PER_1M_OUTPUT_TOKENS
                 total_cost_usd = cost_input + cost_output
+                
+                # Bangun token info dictionary untuk di-return
+                token_info = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_cost_usd": total_cost_usd
+                }
 
                 print("\n==========================================")
                 print("KEPUTUSAN AGEN KLASIFIKASI")
@@ -121,15 +128,15 @@ class ClassifierAgent:
                 else:
                     print("[Agen Klasifikasi] Mode no-mlflow aktif: log eksperimen dilewati.")
                 
-                # Mengembalikan tuple berisi teks dan biayanya
-                return hasil_akhir, total_cost_usd
+                # Mengembalikan tuple berisi teks, biaya, dan token info
+                return hasil_akhir, total_cost_usd, token_info
                 
             except Exception as e:
                 error_msg = f"Gagal memproses klasifikasi via Groq API: {e}"
                 print(f"[!] ERROR: {error_msg}")
                 if self.enable_mlflow:
                     mlflow.log_param("error", str(e))
-                return error_msg, 0.0
+                return error_msg, 0.0, None
 
 # Blok pengujian lokal (Tetap dibiarkan, tidak akan mengganggu)
 if __name__ == "__main__":
@@ -137,6 +144,9 @@ if __name__ == "__main__":
     
     kasus = "Pak, jalan paving di gang RT 04 itu sudah hancur parah dan berlubang, kalau malam gelap gulita rawan ibu-ibu jatuh dari motor."
 
-    hasil_text, biaya = agen.analyze(kasus, run_name="Tes_Jalan_Paving_Rusak")
+    hasil_text, biaya, token_info = agen.analyze(kasus, run_name="Tes_Jalan_Paving_Rusak")
     print(f"\n[LOCAL TEST] Estimasi biaya simulasi: ${biaya:.4f}")
     print(f"[LOCAL TEST] Panjang output: {len(str(hasil_text))} karakter")
+    if token_info:
+        print(f"[LOCAL TEST] Prompt tokens: {token_info.get('prompt_tokens', 0)}")
+        print(f"[LOCAL TEST] Completion tokens: {token_info.get('completion_tokens', 0)}")
