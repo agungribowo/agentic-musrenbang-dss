@@ -542,7 +542,8 @@ def main():
             print("\n" + fairness_text)
         
         if enable_mlflow:
-            with mlflow.start_run(run_name="KESIMPULAN_RATA_RATA_EVALUASI"):
+            mlflow.end_run()  # Ensure no active run before summary
+            with mlflow.start_run(run_name="KESIMPULAN_RATA_RATA_EVALUASI", nested=True):
                 mlflow.log_param("judge_model", settings.OLLAMA_JUDGE_MODEL)
                 mlflow.log_param("dataset_size", len(df_sample))
                 mlflow.log_param("sampling_mode", args.sampling_mode)
