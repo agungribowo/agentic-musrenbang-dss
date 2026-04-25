@@ -410,6 +410,7 @@ def main():
 
     if enable_mlflow:
         mlflow.set_experiment("Evaluasi-Massal-Klasifikasi")
+        mlflow.end_run()  # Ensure no active run before starting iteration
     
     total_accuracy = 0
     total_reasoning = 0
@@ -500,7 +501,7 @@ def main():
                 strata_eval_stats[stratum_value]["passed"] += 1 if is_passed else 0
             
             if enable_mlflow:
-                with mlflow.start_run(run_name=f"Hakim_Row_{index}"):
+                with mlflow.start_run(run_name=f"Hakim_Row_{index}", nested=True):
                     # Log skor mentah (Metrics asli Anda)
                     mlflow.log_metric("classifier_accuracy", acc_score)
                     mlflow.log_metric("classifier_reasoning", reason_score)
